@@ -8,11 +8,15 @@
     "convex"
   ],
   "scripts": {
+    "install:all": "npm install --workspaces",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "clean": "npm run clean --workspaces --if-present"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "convex": "^1.36.1"
   }
 }
