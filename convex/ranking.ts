@@ -70,8 +70,22 @@ export const upsertResults = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
     const rankedAt = args.rankedAt ?? now;
+    const merged = new Map<
+      string,
+      (typeof args.rankings)[number]
+    >();
 
     for (const ranking of args.rankings) {
+      const key = ranking.postingId;
+      const prior = merged.get(key);
+      if (!prior || ranking.rank < prior.rank) {
+        merged.set(key, ranking);
+      }
+    }
+
+    const deduped = args.rankings.length - merged.size;
+
+    for (const ranking of merged.values()) {
       await ctx.db.insert('job_rankings', {
         postingId: ranking.postingId,
         criteriaId: args.criteriaId,
@@ -89,8 +103,10 @@ export const upsertResults = mutation({
     }
 
     return {
-      saved: args.rankings.length,
+      saved: merged.size,
       rankedAt,
+      inputCount: args.rankings.length,
+      dedupedInBatch: deduped,
     };
   },
 });

@@ -11,9 +11,11 @@
     "install:all": "npm install --workspaces",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "clean": "npm run clean --workspaces --if-present"
+    "clean": "npm run clean --workspaces --if-present",
+    "dev:all": "concurrently -n convex,web,worker -c cyan,magenta,yellow \"npx convex dev\" \"npm run dev --workspace @job-bot/web\" \"npm run dev --workspace @job-bot/worker\""
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "typescript": "^5.9.3"
   },
   "dependencies": {

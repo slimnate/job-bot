@@ -5,3 +5,13 @@ coverage
 .env
 
 .env.local
+
+# Accidental tsc output next to Convex sources (breaks `npx convex dev` bundling)
+/convex/criteria.js
+/convex/postings.js
+/convex/ranking.js
+/convex/runs.js
+/convex/schema.js
+/convex/*.js.map
+/convex/*.d.ts
+/convex/*.d.ts.map

@@ -6,8 +6,8 @@
   "main": "dist/schema.js",
   "types": "dist/schema.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
     "clean": "rm -rf dist"
   },
   "dependencies": {

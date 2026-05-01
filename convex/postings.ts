@@ -38,6 +38,17 @@ const postingInputValidator = v.object({
   rawPayload: v.optional(v.any()),
 });
 
+function normalizePostingKey(source: string, externalId: string): { source: string; externalId: string } {
+  return {
+    source: source.trim().toLowerCase(),
+    externalId: externalId.trim(),
+  };
+}
+
+function dedupeKey(source: string, externalId: string): string {
+  return `${source}\0${externalId}`;
+}
+
 export const list = query({
   args: {
     query: v.optional(v.string()),
@@ -115,16 +126,51 @@ export const upsertBatch = mutation({
   handler: async (ctx, args) => {
     let inserted = 0;
     let updated = 0;
+    let skippedInvalid = 0;
     const now = Date.now();
+    const mergedByKey = new Map<string, (typeof args.postings)[number]>();
+    const urlByKey = new Map<string, string>();
 
     for (const posting of args.postings) {
-      const postingsForSource = await ctx.db
+      const { source, externalId } = normalizePostingKey(posting.source, posting.externalId);
+      if (!source || !externalId) {
+        skippedInvalid += 1;
+        continue;
+      }
+
+      const key = dedupeKey(source, externalId);
+      const normalizedUrl = posting.url.trim();
+      if (!normalizedUrl) {
+        skippedInvalid += 1;
+        continue;
+      }
+
+      const priorUrl = urlByKey.get(key);
+      if (priorUrl !== undefined && priorUrl !== normalizedUrl) {
+        skippedInvalid += 1;
+        continue;
+      }
+      urlByKey.set(key, normalizedUrl);
+
+      mergedByKey.set(key, {
+        ...posting,
+        source,
+        externalId,
+        url: normalizedUrl,
+        title: posting.title.trim(),
+        company: posting.company.trim(),
+      });
+    }
+
+    const batchDeduped = args.postings.length - mergedByKey.size - skippedInvalid;
+
+    for (const posting of mergedByKey.values()) {
+      const existing = await ctx.db
         .query('job_postings')
-        .withIndex('by_source_external_id', (q) => q.eq('source', posting.source))
-        .collect();
-      const existing = postingsForSource.find(
-        (sourcePosting) => sourcePosting.externalId === posting.externalId
-      );
+        .withIndex('by_source_external_id', (q) =>
+          q.eq('source', posting.source).eq('externalId', posting.externalId)
+        )
+        .first();
 
       if (existing) {
         await ctx.db.patch(existing._id, {
@@ -167,6 +213,9 @@ export const upsertBatch = mutation({
       inserted,
       updated,
       total: args.postings.length,
+      processed: mergedByKey.size,
+      batchDeduped,
+      skippedInvalid,
     };
   },
 });
