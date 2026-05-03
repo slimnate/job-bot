@@ -5,3 +5,5 @@ When working on Convex code, **always read `convex/_generated/ai/guidelines.md` 
 
 Convex agent skills for common tasks can be installed by running `npx convex ai-files install`.
 <!-- convex-ai-end -->
+
+Whenever you would like to add/install new npm packages, do not try to install them yourself, just add them to the package.json and remind me to run `npm install` at the end of your response.
