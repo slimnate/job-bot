@@ -1,17 +1,21 @@
+import { Navigate, Route, Routes } from 'react-router-dom';
+
+import { AppLayout } from './components/AppLayout';
 import { CriteriaEditor } from './components/CriteriaEditor';
 import { HistoryViewer } from './components/HistoryViewer';
 import { PostingViewer } from './components/PostingViewer';
+import { DashboardHome } from './pages/DashboardHome';
 
 export function App() {
   return (
-    <main className='page'>
-      <header className='page-header'>
-        <h1>Job Bot Dashboard</h1>
-        <p>Manage criteria, browse ranked postings, and track scraping runs.</p>
-      </header>
-      <CriteriaEditor />
-      <PostingViewer />
-      <HistoryViewer />
-    </main>
+    <Routes>
+      <Route element={<AppLayout />}>
+        <Route index element={<DashboardHome />} />
+        <Route path='criteria' element={<CriteriaEditor />} />
+        <Route path='postings' element={<PostingViewer />} />
+        <Route path='history' element={<HistoryViewer />} />
+        <Route path='*' element={<Navigate to='/' replace />} />
+      </Route>
+    </Routes>
   );
 }

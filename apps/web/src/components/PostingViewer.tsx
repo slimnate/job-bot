@@ -2,17 +2,12 @@ import { useMemo, useState } from 'react';
 import { useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
+import { PostingTable } from './PostingTable';
 
 type PostingSort = 'discoveredAtDesc' | 'postedAtDesc' | 'scoreDesc';
 
-const formatDateTime = (timestamp?: number): string => {
-  if (!timestamp) {
-    return '-';
-  }
-  return new Date(timestamp).toLocaleString();
-};
-
 export function PostingViewer() {
+  const totalPostings = useQuery(api.postings.count);
   const [postingQuery, setPostingQuery] = useState('');
   const [postingSource, setPostingSource] = useState('');
   const [postingSort, setPostingSort] = useState<PostingSort>('scoreDesc');
@@ -36,7 +31,12 @@ export function PostingViewer() {
   return (
     <section className='panel'>
       <div className='panel-heading'>
-        <h2>Ranked Postings</h2>
+        <div>
+          <h2>Ranked Postings</h2>
+          {totalPostings !== undefined ? (
+            <p className='panel-subtitle tight'>{totalPostings} total in database</p>
+          ) : null}
+        </div>
       </div>
       <div className='filters'>
         <input
@@ -66,44 +66,10 @@ export function PostingViewer() {
           <option value='postedAtDesc'>Posted (newest)</option>
         </select>
       </div>
-      <div className='table-wrapper'>
-        <table>
-          <thead>
-            <tr>
-              <th>Score</th>
-              <th>Role</th>
-              <th>Company</th>
-              <th>Source</th>
-              <th>Location</th>
-              <th>Posted</th>
-              <th>Discovered</th>
-            </tr>
-          </thead>
-          <tbody>
-            {postings?.length ? (
-              postings.map((posting) => (
-                <tr key={posting._id}>
-                  <td>{posting.latestRanking?.scoreOverall ?? '-'}</td>
-                  <td>
-                    <a href={posting.url} target='_blank' rel='noreferrer'>
-                      {posting.title}
-                    </a>
-                  </td>
-                  <td>{posting.company}</td>
-                  <td>{posting.source}</td>
-                  <td>{posting.location ?? '-'}</td>
-                  <td>{formatDateTime(posting.postedAt)}</td>
-                  <td>{formatDateTime(posting.discoveredAt)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={7}>No postings match these filters.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <PostingTable
+        postings={postings}
+        emptyMessage={postings === undefined ? 'Loading…' : 'No postings match these filters.'}
+      />
     </section>
   );
 }

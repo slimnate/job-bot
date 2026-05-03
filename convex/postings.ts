@@ -119,6 +119,14 @@ export const list = query({
   },
 });
 
+export const count = query({
+  args: {},
+  handler: async (ctx) => {
+    const postings = await ctx.db.query('job_postings').collect();
+    return postings.length;
+  },
+});
+
 export const upsertBatch = mutation({
   args: {
     postings: v.array(postingInputValidator),
