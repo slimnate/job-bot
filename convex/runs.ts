@@ -1,6 +1,8 @@
 import { mutation, query } from './_generated/server.js';
 import { v } from 'convex/values';
 
+import type { Id } from './_generated/dataModel.js';
+
 const statsValidator = v.object({
   discoveredCount: v.number(),
   dedupedCount: v.number(),
@@ -58,7 +60,9 @@ export const trigger = mutation({
       ? [args.source]
       : (criteria?.targetSources.length ? criteria.targetSources : ['manual']);
 
-    const runIds = [];
+    const triggerRuns: Array<{ runId: Id<'scrape_runs'>; source: string }> = [];
+    const runIds: Id<'scrape_runs'>[] = [];
+
     for (const source of resolvedSources) {
       const runId = await ctx.db.insert('scrape_runs', {
         criteriaId: criteria?._id,
@@ -69,12 +73,63 @@ export const trigger = mutation({
         updatedAt: now,
       });
       runIds.push(runId);
+      triggerRuns.push({ runId, source });
     }
 
     return {
       criteriaId: criteria?._id ?? null,
       runIds,
+      runs: triggerRuns,
     };
+  },
+});
+
+export const updateQueued = mutation({
+  args: {
+    runId: v.id('scrape_runs'),
+    source: v.optional(v.string()),
+    criteriaId: v.optional(v.union(v.id('job_criteria'), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) {
+      throw new Error('Run not found');
+    }
+    if (run.status !== 'queued') {
+      throw new Error('Only queued runs can be edited');
+    }
+    if (args.source === undefined && args.criteriaId === undefined) {
+      return;
+    }
+
+    const now = Date.now();
+    const patch: {
+      source?: string;
+      criteriaId?: typeof run.criteriaId;
+      updatedAt: number;
+    } = { updatedAt: now };
+
+    if (args.source !== undefined) {
+      const trimmed = args.source.trim();
+      if (!trimmed) {
+        throw new Error('Source cannot be empty');
+      }
+      patch.source = trimmed;
+    }
+
+    if (args.criteriaId !== undefined) {
+      if (args.criteriaId === null) {
+        patch.criteriaId = undefined;
+      } else {
+        const criterion = await ctx.db.get(args.criteriaId);
+        if (!criterion) {
+          throw new Error('Criteria not found');
+        }
+        patch.criteriaId = args.criteriaId;
+      }
+    }
+
+    await ctx.db.patch(args.runId, patch);
   },
 });
 

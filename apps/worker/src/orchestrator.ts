@@ -2,6 +2,8 @@ import { ConvexHttpClient } from 'convex/browser';
 
 import { api } from './convexBridge/api.js';
 import type { Doc, Id } from './convexBridge/doc.js';
+
+const runIdKey = (runId: Id<'scrape_runs'>): string => runId as string;
 import { workerLog } from './log.js';
 import { InMemoryTaskQueue } from './queue.js';
 import { rankJobsWithLlm, type LlmRankingCandidate } from './ranking/rankJobsWithLlm.js';
@@ -41,6 +43,8 @@ const convexRetryOptions = {
 export class WorkerOrchestrator {
   private readonly convex: ConvexHttpClient;
   private readonly queue: InMemoryTaskQueue<QueuePayload>;
+  /** Run IDs already handed to the in-memory queue (or running). Prevents duplicate work from scheduler + DB. */
+  private readonly inflightRunIds = new Set<string>();
 
   constructor(params: { convexUrl: string; concurrency: number }) {
     this.convex = new ConvexHttpClient(params.convexUrl);
@@ -62,16 +66,72 @@ export class WorkerOrchestrator {
       })
     );
 
-    for (const runId of triggered.runIds) {
-      const source = input.source ?? 'manual';
+    const entries =
+      triggered.runs ??
+      triggered.runIds.map((runId: Id<'scrape_runs'>) => ({
+        runId,
+        source: input.source ?? 'manual',
+      }));
+
+    for (const entry of entries) {
+      if (!this.tryClaimRun(entry.runId)) {
+        continue;
+      }
       this.queue.enqueue({
-        id: `run:${runId}`,
-        context: { runId, source },
+        id: `run:${entry.runId}`,
+        context: { runId: entry.runId, source: entry.source },
         run: async (payload) => {
-          await this.processRun(payload);
+          try {
+            await this.processRun(payload);
+          } finally {
+            this.releaseRun(entry.runId);
+          }
         },
       });
     }
+  }
+
+  /**
+   * Picks up scrape runs that are queued in Convex but not yet in the worker queue
+   * (for example when the dashboard inserted rows via `runs.trigger` alone).
+   */
+  async enqueueDbQueuedRuns(): Promise<void> {
+    const queued = await this.runConvex('runs.list:queued', () =>
+      this.convex.query(api.runs.list, {
+        status: 'queued',
+        limit: 50,
+      })
+    );
+
+    for (const row of queued) {
+      if (!this.tryClaimRun(row._id)) {
+        continue;
+      }
+      this.queue.enqueue({
+        id: `run:${row._id}`,
+        context: { runId: row._id, source: row.source },
+        run: async (payload) => {
+          try {
+            await this.processRun(payload);
+          } finally {
+            this.releaseRun(row._id);
+          }
+        },
+      });
+    }
+  }
+
+  private tryClaimRun(runId: Id<'scrape_runs'>): boolean {
+    const key = runIdKey(runId);
+    if (this.inflightRunIds.has(key)) {
+      return false;
+    }
+    this.inflightRunIds.add(key);
+    return true;
+  }
+
+  private releaseRun(runId: Id<'scrape_runs'>): void {
+    this.inflightRunIds.delete(runIdKey(runId));
   }
 
   async enqueueScheduledRuns(): Promise<void> {

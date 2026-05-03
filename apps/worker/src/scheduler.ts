@@ -54,6 +54,7 @@ export class WorkerScheduler {
     this.tickInProgress = true;
     const tickStartedAt = Date.now();
     try {
+      await this.orchestrator.enqueueDbQueuedRuns();
       await this.orchestrator.enqueueScheduledRuns();
       const snapshot = this.orchestrator.queueSnapshot();
       workerLog.info('scheduler.tick.complete', {

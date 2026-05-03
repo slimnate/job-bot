@@ -48,6 +48,20 @@ export const listActive = query({
       .collect(),
 });
 
+export const list = query({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit && args.limit > 0 ? args.limit : 50;
+    return ctx.db
+      .query('job_criteria')
+      .withIndex('by_updated_at')
+      .order('desc')
+      .take(limit);
+  },
+});
+
 export const upsert = mutation({
   args: {
     id: v.optional(v.id('job_criteria')),

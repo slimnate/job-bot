@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
+import { ScrapeQueuePanel } from './ScrapeQueuePanel';
 
 type RunStatus = '' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
@@ -60,70 +61,73 @@ export function HistoryViewer() {
   };
 
   return (
-    <section className='panel'>
-      <div className='panel-heading'>
-        <h2>Scrape Run History</h2>
-        <button onClick={onTriggerRun} disabled={isTriggeringRun}>
-          {isTriggeringRun ? 'Triggering...' : 'Trigger run'}
-        </button>
-      </div>
-      {triggerMessage ? <p className='status-text'>{triggerMessage}</p> : null}
-      <div className='filters'>
-        <select value={runSourceFilter} onChange={(event) => setRunSourceFilter(event.target.value)}>
-          <option value=''>All sources</option>
-          {runSources.map((source) => (
-            <option value={source} key={source}>
-              {source}
-            </option>
-          ))}
-        </select>
-        <select value={runStatusFilter} onChange={(event) => setRunStatusFilter(event.target.value as RunStatus)}>
-          <option value=''>All statuses</option>
-          <option value='queued'>Queued</option>
-          <option value='running'>Running</option>
-          <option value='succeeded'>Succeeded</option>
-          <option value='failed'>Failed</option>
-          <option value='cancelled'>Cancelled</option>
-        </select>
-      </div>
-      <div className='table-wrapper'>
-        <table>
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Source</th>
-              <th>Started</th>
-              <th>Ended</th>
-              <th>Duration</th>
-              <th>Stats</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs?.length ? (
-              runs.map((run) => (
-                <tr key={run._id}>
-                  <td>{run.status}</td>
-                  <td>{run.source}</td>
-                  <td>{formatDateTime(run.startedAt)}</td>
-                  <td>{formatDateTime(run.endedAt)}</td>
-                  <td>{formatRunDuration(run.startedAt, run.endedAt)}</td>
-                  <td>
-                    {run.stats
-                      ? `disc ${run.stats.discoveredCount}, ins ${run.stats.insertedCount}, rank ${run.stats.rankedCount}`
-                      : '-'}
-                  </td>
-                  <td>{run.errorMessage ?? '-'}</td>
-                </tr>
-              ))
-            ) : (
+    <>
+      <ScrapeQueuePanel />
+      <section className='panel'>
+        <div className='panel-heading'>
+          <h2>Scrape Run History</h2>
+          <button onClick={onTriggerRun} disabled={isTriggeringRun}>
+            {isTriggeringRun ? 'Triggering...' : 'Trigger run'}
+          </button>
+        </div>
+        {triggerMessage ? <p className='status-text'>{triggerMessage}</p> : null}
+        <div className='filters'>
+          <select value={runSourceFilter} onChange={(event) => setRunSourceFilter(event.target.value)}>
+            <option value=''>All sources</option>
+            {runSources.map((source) => (
+              <option value={source} key={source}>
+                {source}
+              </option>
+            ))}
+          </select>
+          <select value={runStatusFilter} onChange={(event) => setRunStatusFilter(event.target.value as RunStatus)}>
+            <option value=''>All statuses</option>
+            <option value='queued'>Queued</option>
+            <option value='running'>Running</option>
+            <option value='succeeded'>Succeeded</option>
+            <option value='failed'>Failed</option>
+            <option value='cancelled'>Cancelled</option>
+          </select>
+        </div>
+        <div className='table-wrapper'>
+          <table>
+            <thead>
               <tr>
-                <td colSpan={7}>No runs recorded yet.</td>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Started</th>
+                <th>Ended</th>
+                <th>Duration</th>
+                <th>Stats</th>
+                <th>Error</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            </thead>
+            <tbody>
+              {runs?.length ? (
+                runs.map((run) => (
+                  <tr key={run._id}>
+                    <td>{run.status}</td>
+                    <td>{run.source}</td>
+                    <td>{formatDateTime(run.startedAt)}</td>
+                    <td>{formatDateTime(run.endedAt)}</td>
+                    <td>{formatRunDuration(run.startedAt, run.endedAt)}</td>
+                    <td>
+                      {run.stats
+                        ? `disc ${run.stats.discoveredCount}, ins ${run.stats.insertedCount}, rank ${run.stats.rankedCount}`
+                        : '-'}
+                    </td>
+                    <td>{run.errorMessage ?? '-'}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7}>No runs recorded yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
