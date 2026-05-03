@@ -1,4 +1,4 @@
-import type { Id } from '../../../convex/_generated/dataModel.js';
+import type { Id } from './convexBridge/doc.js';
 
 type ScrapedPostingInput = {
   source: string;

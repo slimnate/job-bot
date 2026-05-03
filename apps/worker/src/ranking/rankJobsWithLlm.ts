@@ -1,11 +1,11 @@
-import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
+import type { Doc, Id } from '../convexBridge/doc.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { workerLog } from '../log.js';
 import { withRetry } from '../retry.js';
 
-type LlmRankingCandidate = Pick<
+export type LlmRankingCandidate = Pick<
   Doc<'job_postings'>,
   '_id' | 'title' | 'company' | 'location' | 'salaryText' | 'descriptionSnippet' | 'postedAt' | 'url' | 'source'
 >;

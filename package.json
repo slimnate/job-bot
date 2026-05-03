@@ -2,11 +2,7 @@
   "name": "job-bot",
   "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "convex"
-  ],
+  "workspaces": ["apps/*", "packages/*", "convex"],
   "scripts": {
     "install:all": "npm install --workspaces",
     "build": "npm run build --workspaces --if-present",

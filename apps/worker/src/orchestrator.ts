@@ -1,9 +1,10 @@
 import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../../../convex/_generated/api.js';
-import type { Doc, Id } from '../../../convex/_generated/dataModel.js';
+
+import { api } from './convexBridge/api.js';
+import type { Doc, Id } from './convexBridge/doc.js';
 import { workerLog } from './log.js';
 import { InMemoryTaskQueue } from './queue.js';
-import { rankJobsWithLlm } from './ranking/rankJobsWithLlm.js';
+import { rankJobsWithLlm, type LlmRankingCandidate } from './ranking/rankJobsWithLlm.js';
 import { withRetry } from './retry.js';
 import { collectPostingsForSource } from './sourceAdapters.js';
 
@@ -90,17 +91,18 @@ export class WorkerOrchestrator {
       return;
     }
 
+    const criteriaRow = activeCriteria as Doc<'job_criteria'> & { targetSources: string[] };
     const uniqueSources = Array.from(
       new Set(
-        (activeCriteria.targetSources.length > 0 ? activeCriteria.targetSources : ['manual']).map(
-          (source) => source.trim()
+        (criteriaRow.targetSources.length > 0 ? criteriaRow.targetSources : ['manual']).map((source: string) =>
+          source.trim()
         )
       )
-    ).filter((source) => source.length > 0);
+    ).filter((source: string) => source.length > 0);
 
     for (const source of uniqueSources) {
       await this.triggerAndEnqueue({
-        criteriaId: activeCriteria._id,
+        criteriaId: criteriaRow._id,
         source,
       });
     }
@@ -187,7 +189,7 @@ export class WorkerOrchestrator {
       const rankingResult = await rankJobsWithLlm({
         criteria: recompute.criteria,
         model: recompute.model,
-        candidates: candidatesForRun,
+        candidates: candidatesForRun as unknown as LlmRankingCandidate[],
       });
       const rankings = rankingResult.rankings;
 
