@@ -5,7 +5,10 @@
     "rootDir": "src",
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": true
+    "sourceMap": true,
+    "paths": {
+      "@job-bot/shared": ["packages/shared/src/index.ts"]
+    }
   },
   "include": ["src"]
 }

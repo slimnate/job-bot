@@ -10,7 +10,11 @@ export class WorkerScheduler {
   private readonly orchestrator: WorkerOrchestrator;
   private readonly config: WorkerSchedulerConfig;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private tickInProgress = false;
+  /**
+   * Serializes ticks so they never overlap and none are dropped. Startup / interval / runNow all
+   * chain here; previously a concurrent tick was skipped and DB-queued runs could stay unpicked.
+   */
+  private tail: Promise<void> = Promise.resolve();
 
   constructor(orchestrator: WorkerOrchestrator, config: WorkerSchedulerConfig) {
     this.orchestrator = orchestrator;
@@ -23,11 +27,11 @@ export class WorkerScheduler {
     }
 
     if (this.config.runOnStart) {
-      void this.tick();
+      void this.enqueueTick('run_on_start');
     }
 
     this.timer = setInterval(() => {
-      void this.tick();
+      void this.enqueueTick('interval');
     }, this.config.intervalMs);
   }
 
@@ -40,35 +44,31 @@ export class WorkerScheduler {
   }
 
   async runNow(): Promise<void> {
-    await this.tick();
+    await this.enqueueTick('run_now');
   }
 
-  private async tick(): Promise<void> {
-    if (this.tickInProgress) {
-      workerLog.warn('scheduler.tick.skipped', {
-        reason: 'previous_tick_in_progress',
-      });
-      return;
-    }
-
-    this.tickInProgress = true;
-    const tickStartedAt = Date.now();
-    try {
-      await this.orchestrator.enqueueDbQueuedRuns();
-      await this.orchestrator.enqueueScheduledRuns();
-      const snapshot = this.orchestrator.queueSnapshot();
-      workerLog.info('scheduler.tick.complete', {
-        durationMs: Date.now() - tickStartedAt,
-        ...snapshot,
-      });
-    } catch (error: unknown) {
-      workerLog.error('scheduler.tick.failed', {
-        durationMs: Date.now() - tickStartedAt,
-        err: error instanceof Error ? error.message : 'Unknown scheduler error',
-      });
-    } finally {
-      this.tickInProgress = false;
-    }
+  private enqueueTick(trigger: string): Promise<void> {
+    const job = this.tail.then(async () => {
+      const tickStartedAt = Date.now();
+      try {
+        await this.orchestrator.enqueueDbQueuedRuns();
+        await this.orchestrator.enqueueScheduledRuns();
+        const snapshot = this.orchestrator.queueSnapshot();
+        workerLog.info('scheduler.tick.complete', {
+          trigger,
+          durationMs: Date.now() - tickStartedAt,
+          ...snapshot,
+        });
+      } catch (error: unknown) {
+        workerLog.error('scheduler.tick.failed', {
+          trigger,
+          durationMs: Date.now() - tickStartedAt,
+          err: error instanceof Error ? error.message : 'Unknown scheduler error',
+        });
+      }
+    });
+    this.tail = job.catch(() => {});
+    return job;
   }
 }
 

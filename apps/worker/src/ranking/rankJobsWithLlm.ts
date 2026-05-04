@@ -23,6 +23,8 @@ type LlmRequestPayload = {
   criteria: Doc<'job_criteria'> | null;
   candidates: LlmRankingCandidate[];
   model: string;
+  /** When set, overrides `LLM_RANKING_PROVIDER` for this call only. */
+  provider?: 'http' | 'cursor';
 };
 
 type LlmClientConfig = {
@@ -130,18 +132,15 @@ function loadCursorCliConfig(modelOverride?: string): CursorCliConfig {
   };
 }
 
+function strTrim(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 function buildPrompt(payload: LlmRequestPayload): string {
-  const criteria = payload.criteria
-    ? {
-        titleKeywords: payload.criteria.titleKeywords,
-        excludedKeywords: payload.criteria.excludedKeywords,
-        locations: payload.criteria.locations,
-        remotePolicy: payload.criteria.remotePolicy ?? 'any',
-        salaryHints: payload.criteria.salaryHints ?? [],
-        seniority: payload.criteria.seniority ?? 'any',
-        notes: payload.criteria.notes ?? '',
-      }
-    : null;
+  const c = payload.criteria;
+  const profileName = strTrim(c?.name);
+  const rankingPrompt = strTrim(c?.rankingPrompt);
+  const resumeMarkdown = strTrim(c?.resumeMarkdown);
 
   const candidateJobs = payload.candidates.map((candidate) => ({
     postingId: candidate._id,
@@ -155,7 +154,7 @@ function buildPrompt(payload: LlmRequestPayload): string {
     descriptionSnippet: candidate.descriptionSnippet ?? null,
   }));
 
-  return [
+  const sections: string[] = [
     'You rank job postings for a single user profile.',
     'Return JSON only. Do not include markdown.',
     'Output requirements:',
@@ -167,9 +166,21 @@ function buildPrompt(payload: LlmRequestPayload): string {
     '- criteriaMatch is an object describing matched and unmet criteria.',
     '- redFlags is an array of strings and can be empty.',
     '',
-    `Criteria: ${JSON.stringify(criteria)}`,
-    `CandidateJobs: ${JSON.stringify(candidateJobs)}`,
-  ].join('\n');
+  ];
+
+  if (profileName.length > 0) {
+    sections.push(`Profile name: ${profileName}`, '');
+  }
+  if (rankingPrompt.length > 0) {
+    sections.push('User ranking instructions:', rankingPrompt, '');
+  }
+  if (resumeMarkdown.length > 0) {
+    sections.push('Candidate resume (Markdown):', resumeMarkdown, '');
+  }
+
+  sections.push(`CandidateJobs: ${JSON.stringify(candidateJobs)}`);
+
+  return sections.join('\n');
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -380,7 +391,7 @@ export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
     };
   }
 
-  const provider = resolveProvider();
+  const provider = payload.provider ?? resolveProvider();
   const httpConfig = provider === 'http' ? loadLlmConfig(payload.model) : null;
   const cursorConfig = provider === 'cursor' ? loadCursorCliConfig(payload.model) : null;
 
@@ -428,4 +439,21 @@ export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
   }
 
   throw new Error('LLM ranking output failed schema validation after one retry.');
+}
+
+/**
+ * Helper for one-off/manual flows where Cursor CLI is the expected provider.
+ * Defaults to `cursor` when no provider override is passed.
+ */
+export async function rankJobsWithCursor(
+  payload: Omit<LlmRequestPayload, 'provider'>,
+  provider: RankingProvider = 'cursor'
+): Promise<{
+  model: string;
+  rankings: RankingResult[];
+}> {
+  return rankJobsWithLlm({
+    ...payload,
+    provider,
+  });
 }

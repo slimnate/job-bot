@@ -31,10 +31,12 @@ export function DashboardHome() {
           </li>
           <li>
             <Link to='/criteria'>Criteria</Link>
-            <span className='dashboard-links-hint'>Keywords, locations, and ranking preferences.</span>
+            <span className='dashboard-links-hint'>
+              Multiple profiles, resume, and ranking instructions for the LLM.
+            </span>
           </li>
           <li>
-            <Link to='/history'>Scrape history</Link>
+            <Link to='/workers'>Workers</Link>
             <span className='dashboard-links-hint'>Runs, stats, and manual triggers.</span>
           </li>
         </ul>

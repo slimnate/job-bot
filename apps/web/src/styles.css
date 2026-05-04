@@ -140,6 +140,79 @@ a {
   color: #9ca3af;
 }
 
+/** Helper line under form labels (e.g. Criteria notes vs ranking prompt). */
+.field-hint {
+  display: block;
+  margin-top: 0.1rem;
+  margin-bottom: 0.15rem;
+  font-size: 0.82rem;
+  color: #9ca3af;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.field-hint code {
+  font-size: 0.8em;
+  color: #cbd5e1;
+}
+
+.criteria-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .criteria-editor-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.criteria-profile-sidebar-actions {
+  margin-bottom: 0.75rem;
+}
+
+.criteria-profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.criteria-profile-pill {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: #111827;
+  border-color: #334155;
+  font-size: 0.88rem;
+}
+
+.criteria-profile-pill.active {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #1d4ed8 inset;
+}
+
+.criteria-profile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.criteria-profile-badge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #93c5fd;
+}
+
 .dashboard-more {
   margin: 0.75rem 0 0;
   font-size: 0.9rem;
@@ -186,6 +259,30 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/** Destructive actions (delete, clear all). */
+button.btn-danger {
+  background: #b91c1c;
+  border-color: #991b1b;
+  color: #fef2f2;
+}
+
+button.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #b91c1c;
+}
+
+/** Primary modal / form actions. */
+button.btn-primary {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #eff6ff;
+}
+
+button.btn-primary:hover:not(:disabled) {
+  background: #3b82f6;
+  border-color: #2563eb;
+}
+
 .actions {
   display: flex;
   align-items: center;
@@ -195,6 +292,39 @@ button:disabled {
 .status-text {
   color: #93c5fd;
   font-size: 0.9rem;
+}
+
+.status-text.error {
+  color: #fca5a5;
+}
+
+.stacked-field {
+  display: block;
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+.score-criteria-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.score-hint {
+  margin-top: 0.75rem;
+}
+
+.score-hint code {
+  font-size: 0.78em;
+}
+
+.modal-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
 }
 
 .filters {
@@ -234,12 +364,22 @@ thead th {
   color: #9ca3af;
 }
 
+.queue-add-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.queue-add-linkedin label {
+  margin: 0;
+}
+
 .queue-add-row {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
   gap: 0.75rem;
   align-items: end;
-  margin-bottom: 0.75rem;
 }
 
 .queue-add-row label {
@@ -255,12 +395,214 @@ thead th {
   white-space: nowrap;
 }
 
+.timestamp-cell {
+  white-space: nowrap;
+}
+
 .queue-actions-cell button {
   margin-right: 0.35rem;
 }
 
 .queue-actions-cell button:last-child {
   margin-right: 0;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  text-transform: lowercase;
+  border: 1px solid transparent;
+}
+
+.status-queued {
+  color: #93c5fd;
+  border-color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.status-running {
+  color: #fde68a;
+  border-color: #ca8a04;
+  background: rgba(202, 138, 4, 0.15);
+}
+
+.status-succeeded {
+  color: #86efac;
+  border-color: #15803d;
+  background: rgba(21, 128, 61, 0.16);
+}
+
+.status-failed,
+.status-cancelled {
+  color: #fca5a5;
+  border-color: #b91c1c;
+  background: rgba(185, 28, 28, 0.16);
+}
+
+.log-level-info {
+  color: #93c5fd;
+  border-color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.log-level-warn {
+  color: #fde68a;
+  border-color: #ca8a04;
+  background: rgba(202, 138, 4, 0.15);
+}
+
+.log-level-error {
+  color: #fca5a5;
+  border-color: #b91c1c;
+  background: rgba(185, 28, 28, 0.16);
+}
+
+.log-level-debug {
+  color: #cbd5e1;
+  border-color: #475569;
+  background: rgba(71, 85, 105, 0.22);
+}
+
+.log-viewer-table {
+  table-layout: auto;
+}
+
+.log-viewer-table .col-log-ts {
+  width: 1%;
+  max-width: 11rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-viewer-table .col-log-level {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.log-viewer-table .col-log-source,
+.log-viewer-table .col-log-service,
+.log-viewer-table .col-log-phase {
+  width: 1%;
+  max-width: 9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-viewer-table .col-log-message {
+  word-break: break-word;
+}
+
+.log-viewer-table .col-log-other {
+  min-width: 12rem;
+  max-width: 28rem;
+  vertical-align: top;
+}
+
+.log-other-block {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: rgba(3, 7, 18, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  background: #141a20;
+}
+
+.modal-card.modal-wide {
+  width: min(1100px, 100%);
+}
+
+.modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #141a20;
+  border-bottom: 1px solid #1f2937;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal-header h3 {
+  margin: 0;
+}
+
+.modal-body {
+  padding: 1rem;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 0.35rem 0.65rem;
+}
+
+.details-grid dt {
+  color: #9ca3af;
+}
+
+.details-grid dd {
+  margin: 0;
+}
+
+.run-detail-meta {
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.run-detail-meta p {
+  margin: 0.25rem 0;
+}
+
+.run-detail-label {
+  color: #9ca3af;
+  margin-right: 0.5rem;
+}
+
+.raw-json-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.35rem;
+}
+
+.run-log-dump {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  max-height: min(70vh, 720px);
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  background: #0b0f14;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 900px) {

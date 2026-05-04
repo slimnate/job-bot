@@ -1,5 +1,8 @@
 import CDP, { type Client } from 'chrome-remote-interface';
 
+/** CDP global exposed on `window` for posting scrape payloads during long evaluates. */
+export const JOB_BOT_POSTING_PUSH_BINDING = '__jobBotPostingPush';
+
 import { LoopGuard } from './loopGuard.js';
 import { withAgentRetry } from './retry.js';
 import type {
@@ -45,7 +48,15 @@ export class CdpChromeDriver implements ChromeDriver {
 
   async connect(): Promise<void> {
     if (this.client) {
-      return;
+      try {
+        await this.client.Runtime.evaluate({
+          expression: 'void 0',
+          returnByValue: true,
+        });
+        return;
+      } catch {
+        await this.disconnect();
+      }
     }
 
     await withAgentRetry(
@@ -132,8 +143,7 @@ export class CdpChromeDriver implements ChromeDriver {
     });
 
     if (evaluation.exceptionDetails) {
-      const errorText = evaluation.exceptionDetails.text || 'Runtime.evaluate failed';
-      throw new Error(errorText);
+      throw new Error(formatRuntimeEvaluateError(evaluation.exceptionDetails));
     }
 
     return evaluation.result.value as T;
@@ -182,6 +192,32 @@ export class CdpChromeDriver implements ChromeDriver {
   async scroll(deltaY: number): Promise<void> {
     const escapedDelta = JSON.stringify(deltaY);
     await this.evaluate<void>(`window.scrollBy({ top: ${escapedDelta}, left: 0, behavior: 'instant' })`);
+  }
+
+  /**
+   * Registers {@link JOB_BOT_POSTING_PUSH_BINDING} so in-page code can call it with one JSON string per job.
+   * Survives SPA navigations on the same target (CDP behavior).
+   */
+  async installJobPostingStreamBinding(
+    bindingName: string,
+    onPayload: (jsonPayload: string) => Promise<void>
+  ): Promise<() => Promise<void>> {
+    const client = this.requireClient();
+    await client.Runtime.addBinding({ name: bindingName });
+    const listener = (params: { name: string; payload: string }) => {
+      if (params.name !== bindingName) {
+        return;
+      }
+      void onPayload(params.payload);
+    };
+    client.Runtime.bindingCalled(listener);
+    return async () => {
+      try {
+        await client.Runtime.removeBinding({ name: bindingName });
+      } catch {
+        // ignore
+      }
+    };
   }
 
   async waitForSelector(selector: string, timeoutMs = this.timeoutMs): Promise<void> {
@@ -239,4 +275,36 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessa
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * CDP often sets `exceptionDetails.text` to the generic prefix `Uncaught`; the real message
+ * is on `exception.description` (first line is usually enough for logs).
+ */
+function formatRuntimeEvaluateError(details: {
+  text?: string;
+  lineNumber?: number;
+  exception?: { description?: string; value?: unknown; type?: string };
+}): string {
+  const desc = details.exception?.description?.trim();
+  if (desc) {
+    const firstLine = desc.split('\n')[0]?.trim();
+    if (firstLine) {
+      return firstLine;
+    }
+  }
+  const uncaughtValue =
+    details.exception?.type === 'string' && typeof details.exception.value === 'string'
+      ? details.exception.value
+      : undefined;
+  if (uncaughtValue) {
+    return uncaughtValue;
+  }
+  const line =
+    typeof details.lineNumber === 'number' ? ` (script line ${details.lineNumber + 1})` : '';
+  const text = details.text?.trim();
+  if (text && text !== 'Uncaught') {
+    return `${text}${line}`;
+  }
+  return text ? `Uncaught${line}` : `Runtime.evaluate failed${line}`;
 }

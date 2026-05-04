@@ -1,5 +1,6 @@
 node_modules
 dist
+job-bot-worker.log
 coverage
 .DS_Store
 .env

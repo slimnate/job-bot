@@ -1,8 +1,10 @@
 import { mutation, query } from './_generated/server.js';
+import { api } from './_generated/api.js';
 import { v } from 'convex/values';
+import type { Id } from './_generated/dataModel.js';
 
 type PostingWithRanking = {
-  _id: string;
+  _id: Id<'job_postings'>;
   _creationTime: number;
   source: string;
   externalId: string;
@@ -14,12 +16,13 @@ type PostingWithRanking = {
   descriptionSnippet?: string;
   postedAt?: number;
   discoveredAt: number;
-  scrapeRunId?: string;
+  scrapeRunId?: Id<'scrape_runs'>;
   rawPayload?: unknown;
   createdAt: number;
   updatedAt: number;
   latestRanking: {
     scoreOverall: number;
+    rankedAt: number;
   } | null;
 };
 
@@ -127,6 +130,16 @@ export const count = query({
   },
 });
 
+/** Single posting for worker / dashboard helpers (e.g. one-off rank). */
+export const getById = query({
+  args: {
+    postingId: v.id('job_postings'),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.postingId);
+  },
+});
+
 export const upsertBatch = mutation({
   args: {
     postings: v.array(postingInputValidator),
@@ -224,6 +237,77 @@ export const upsertBatch = mutation({
       processed: mergedByKey.size,
       batchDeduped,
       skippedInvalid,
+    };
+  },
+});
+
+/**
+ * Deletes one posting and all ranking rows linked to that posting.
+ */
+export const deleteOne = mutation({
+  args: {
+    postingId: v.id('job_postings'),
+  },
+  handler: async (ctx, args) => {
+    const posting = await ctx.db.get(args.postingId);
+    if (!posting) {
+      return { deletedPosting: false, deletedRankings: 0 };
+    }
+
+    let deletedRankings = 0;
+    for (;;) {
+      const batch = await ctx.db
+        .query('job_rankings')
+        .withIndex('by_posting', (q) => q.eq('postingId', args.postingId))
+        .take(200);
+      if (batch.length === 0) {
+        break;
+      }
+      for (const row of batch) {
+        await ctx.db.delete(row._id);
+        deletedRankings += 1;
+      }
+    }
+
+    await ctx.db.delete(args.postingId);
+    return { deletedPosting: true, deletedRankings };
+  },
+});
+
+/**
+ * Clears all postings and ranking rows in bounded batches.
+ * Schedules continuation if rows remain after this transaction.
+ */
+export const clearAll = mutation({
+  args: {
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const batchSize =
+      args.batchSize && args.batchSize > 0 ? Math.min(Math.floor(args.batchSize), 400) : 200;
+
+    const rankingsBatch = await ctx.db.query('job_rankings').take(batchSize);
+    for (const row of rankingsBatch) {
+      await ctx.db.delete(row._id);
+    }
+
+    const postingsBatch = await ctx.db.query('job_postings').take(batchSize);
+    for (const row of postingsBatch) {
+      await ctx.db.delete(row._id);
+    }
+
+    const hasMoreRankings = (await ctx.db.query('job_rankings').take(1)).length > 0;
+    const hasMorePostings = (await ctx.db.query('job_postings').take(1)).length > 0;
+    const hasMore = hasMoreRankings || hasMorePostings;
+
+    if (hasMore) {
+      await ctx.scheduler.runAfter(0, api.postings.clearAll, { batchSize });
+    }
+
+    return {
+      deletedPostings: postingsBatch.length,
+      deletedRankings: rankingsBatch.length,
+      hasMore,
     };
   },
 });

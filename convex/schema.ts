@@ -1,46 +1,37 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
-export const schemaVersion = 'initial';
+export const schemaVersion = 'slim_job_criteria';
 
 export default defineSchema({
   job_criteria: defineTable({
     name: v.string(),
     isActive: v.boolean(),
-    titleKeywords: v.array(v.string()),
-    excludedKeywords: v.array(v.string()),
-    locations: v.array(v.string()),
-    remotePolicy: v.optional(
-      v.union(
-        v.literal('remote'),
-        v.literal('hybrid'),
-        v.literal('onsite'),
-        v.literal('any')
-      )
-    ),
-    salaryHints: v.optional(v.array(v.string())),
-    seniority: v.optional(
-      v.union(
-        v.literal('intern'),
-        v.literal('junior'),
-        v.literal('mid'),
-        v.literal('senior'),
-        v.literal('staff'),
-        v.literal('principal'),
-        v.literal('any')
-      )
-    ),
-    targetSources: v.array(v.string()),
+    /** Private to the user; never sent to the ranking LLM. */
     notes: v.optional(v.string()),
+    resumeMarkdown: v.optional(v.string()),
+    rankingPrompt: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index('by_is_active', ['isActive'])
     .index('by_updated_at', ['updatedAt']),
 
+  /**
+   * Streamed JSON log lines from the worker for a single scrape run (stdout-style `workerLog` output).
+   * `seq` is per-run monotonic so the UI can sort even if writes batch at different times.
+   */
+  run_log_lines: defineTable({
+    runId: v.id('scrape_runs'),
+    seq: v.number(),
+    line: v.string(),
+  }).index('by_run_and_seq', ['runId', 'seq']),
+
   scrape_runs: defineTable({
     criteriaId: v.optional(v.id('job_criteria')),
     source: v.string(),
+    /** LinkedIn: empty/omitted = jobs hub "Jobs based on your preferences" path; non-empty = keyword search. */
+    linkedinSearchQuery: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),
       v.literal('running'),
@@ -105,4 +96,29 @@ export default defineSchema({
     .index('by_posting', ['postingId'])
     .index('by_posting_ranked_at', ['postingId', 'rankedAt'])
     .index('by_score', ['scoreOverall']),
+
+  /**
+   * LLM vendors for manual posting score (UI + scripts). `surface` tells the web app where execution runs.
+   */
+  ranking_llm_providers: defineTable({
+    /** Stable id, e.g. `openai`, `cursor`. */
+    key: v.string(),
+    displayName: v.string(),
+    /** `convex_http`: OpenAI-compatible API from a Convex action. `worker_cursor`: Cursor CLI on the local worker. */
+    surface: v.union(v.literal('convex_http'), v.literal('worker_cursor')),
+    sortOrder: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_key', ['key']),
+
+  /** Models offered per provider (`providerKey` matches `ranking_llm_providers.key`). */
+  ranking_llm_models: defineTable({
+    providerKey: v.string(),
+    /** Value passed to the provider API / CLI (e.g. `gpt-4.1-mini`, `cursor-default`). */
+    apiModelId: v.string(),
+    displayName: v.string(),
+    sortOrder: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_provider_key', ['providerKey']),
 });

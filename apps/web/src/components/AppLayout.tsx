@@ -13,10 +13,10 @@ export function AppLayout() {
               Criteria
             </NavLink>
             <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/postings'>
-              Ranked postings
+              Postings
             </NavLink>
-            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/history'>
-              Scrape history
+            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/workers'>
+              Workers
             </NavLink>
           </nav>
         </div>

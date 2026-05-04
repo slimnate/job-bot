@@ -11,6 +11,9 @@
 import type * as criteria from "../criteria.js";
 import type * as postings from "../postings.js";
 import type * as ranking from "../ranking.js";
+import type * as rankingLlmCatalog from "../rankingLlmCatalog.js";
+import type * as rankingScorePosting from "../rankingScorePosting.js";
+import type * as runLogs from "../runLogs.js";
 import type * as runs from "../runs.js";
 
 import type {
@@ -23,6 +26,9 @@ declare const fullApi: ApiFromModules<{
   criteria: typeof criteria;
   postings: typeof postings;
   ranking: typeof ranking;
+  rankingLlmCatalog: typeof rankingLlmCatalog;
+  rankingScorePosting: typeof rankingScorePosting;
+  runLogs: typeof runLogs;
   runs: typeof runs;
 }>;
 

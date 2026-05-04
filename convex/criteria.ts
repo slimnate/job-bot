@@ -1,27 +1,6 @@
 import { mutation, query } from './_generated/server.js';
 import { v } from 'convex/values';
 
-const remotePolicyValidator = v.optional(
-  v.union(
-    v.literal('remote'),
-    v.literal('hybrid'),
-    v.literal('onsite'),
-    v.literal('any')
-  )
-);
-
-const seniorityValidator = v.optional(
-  v.union(
-    v.literal('intern'),
-    v.literal('junior'),
-    v.literal('mid'),
-    v.literal('senior'),
-    v.literal('staff'),
-    v.literal('principal'),
-    v.literal('any')
-  )
-);
-
 export const get = query({
   args: {
     onlyActive: v.optional(v.boolean()),
@@ -36,6 +15,15 @@ export const get = query({
     }
 
     return await ctx.db.query('job_criteria').order('desc').first();
+  },
+});
+
+export const getById = query({
+  args: {
+    id: v.id('job_criteria'),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
   },
 });
 
@@ -62,28 +50,68 @@ export const list = query({
   },
 });
 
+/**
+ * Inserts a new criteria profile with defaults. Does not change which row is active.
+ */
+export const create = mutation({
+  args: {
+    name: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    return await ctx.db.insert('job_criteria', {
+      name: (args.name ?? 'New profile').trim() || 'New profile',
+      isActive: false,
+      notes: undefined,
+      resumeMarkdown: undefined,
+      rankingPrompt: undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
 export const upsert = mutation({
   args: {
     id: v.optional(v.id('job_criteria')),
     name: v.string(),
     isActive: v.boolean(),
-    titleKeywords: v.array(v.string()),
-    excludedKeywords: v.array(v.string()),
-    locations: v.array(v.string()),
-    remotePolicy: remotePolicyValidator,
-    salaryHints: v.optional(v.array(v.string())),
-    seniority: seniorityValidator,
-    targetSources: v.array(v.string()),
     notes: v.optional(v.string()),
+    resumeMarkdown: v.optional(v.string()),
+    rankingPrompt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const existingId =
-      args.id ??
-      (await ctx.db
-        .query('job_criteria')
-        .withIndex('by_is_active', (q) => q.eq('isActive', true))
-        .first())?._id;
+
+    if (args.id) {
+      const existing = await ctx.db.get(args.id);
+      if (!existing) {
+        throw new Error('Criteria profile not found.');
+      }
+
+      if (args.isActive) {
+        const activeCriteria = await ctx.db
+          .query('job_criteria')
+          .withIndex('by_is_active', (q) => q.eq('isActive', true))
+          .collect();
+
+        for (const criterion of activeCriteria) {
+          if (criterion._id !== args.id) {
+            await ctx.db.patch(criterion._id, { isActive: false, updatedAt: now });
+          }
+        }
+      }
+
+      await ctx.db.patch(args.id, {
+        name: args.name,
+        isActive: args.isActive,
+        notes: args.notes,
+        resumeMarkdown: args.resumeMarkdown,
+        rankingPrompt: args.rankingPrompt,
+        updatedAt: now,
+      });
+      return args.id;
+    }
 
     if (args.isActive) {
       const activeCriteria = await ctx.db
@@ -92,40 +120,16 @@ export const upsert = mutation({
         .collect();
 
       for (const criterion of activeCriteria) {
-        if (criterion._id !== existingId) {
-          await ctx.db.patch(criterion._id, { isActive: false, updatedAt: now });
-        }
+        await ctx.db.patch(criterion._id, { isActive: false, updatedAt: now });
       }
-    }
-
-    if (existingId) {
-      await ctx.db.patch(existingId, {
-        name: args.name,
-        isActive: args.isActive,
-        titleKeywords: args.titleKeywords,
-        excludedKeywords: args.excludedKeywords,
-        locations: args.locations,
-        remotePolicy: args.remotePolicy,
-        salaryHints: args.salaryHints,
-        seniority: args.seniority,
-        targetSources: args.targetSources,
-        notes: args.notes,
-        updatedAt: now,
-      });
-      return existingId;
     }
 
     return await ctx.db.insert('job_criteria', {
       name: args.name,
       isActive: args.isActive,
-      titleKeywords: args.titleKeywords,
-      excludedKeywords: args.excludedKeywords,
-      locations: args.locations,
-      remotePolicy: args.remotePolicy,
-      salaryHints: args.salaryHints,
-      seniority: args.seniority,
-      targetSources: args.targetSources,
       notes: args.notes,
+      resumeMarkdown: args.resumeMarkdown,
+      rankingPrompt: args.rankingPrompt,
       createdAt: now,
       updatedAt: now,
     });
