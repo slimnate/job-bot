@@ -15,6 +15,25 @@ const formatDateTime = (timestamp?: number): string => {
   return new Date(timestamp).toLocaleString();
 };
 
+/**
+ * Maps score ranges to semantic color classes for quick scanning.
+ */
+const getScoreColorClass = (score?: number | null): string => {
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return 'posting-item__score--neutral';
+  }
+  if (score >= 80) {
+    return 'posting-item__score--green';
+  }
+  if (score >= 70) {
+    return 'posting-item__score--blue';
+  }
+  if (score >= 60) {
+    return 'posting-item__score--yellow';
+  }
+  return 'posting-item__score--red';
+};
+
 const DESCRIPTION_PREVIEW_MAX_CHARS = 140;
 
 /**
@@ -29,6 +48,39 @@ const formatDescriptionPreview = (descriptionSnippet?: string): { preview: strin
     return { preview: full, full };
   }
   return { preview: `${full.slice(0, DESCRIPTION_PREVIEW_MAX_CHARS - 1)}…`, full };
+};
+
+/**
+ * Normalizes unknown arrays into display-ready string items.
+ */
+const toPillItems = (value: unknown): string[] => {
+  let rawValue = value;
+  if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        rawValue = JSON.parse(trimmed);
+      } catch {
+        return [];
+      }
+    } else {
+      return [];
+    }
+  }
+  if (!Array.isArray(rawValue)) {
+    return [];
+  }
+  return rawValue
+    .map((item) => {
+      if (typeof item === 'string') {
+        return item.trim();
+      }
+      if (item === null || item === undefined) {
+        return '';
+      }
+      return String(item).trim();
+    })
+    .filter(Boolean);
 };
 
 /**
@@ -48,10 +100,33 @@ function CriteriaMatchDetails({ value }: { value: unknown }) {
     <div className='posting-item__criteria'>
       {entries.map(([key, val]) => (
         <div key={key} className='posting-item__criteria-row'>
-          <span className='posting-item__criteria-key'>{key}</span>
-          <span className='posting-item__criteria-val'>
-            {typeof val === 'object' ? JSON.stringify(val) : String(val)}
-          </span>
+          {key === 'matched' || key === 'unmet' ? null : (
+            <span className='posting-item__criteria-key'>{key}</span>
+          )}
+          {key === 'matched' || key === 'unmet' ? (
+            (() => {
+              const pillItems = toPillItems(val);
+              if (pillItems.length === 0) {
+                return <span className='posting-item__criteria-val'>-</span>;
+              }
+              return (
+                <span className='posting-item__criteria-badge-list'>
+                  {pillItems.map((item, index) => (
+                    <span
+                      key={`${key}-${item}-${index}`}
+                      className={`posting-item__criteria-badge posting-item__criteria-badge--${key}`}
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </span>
+              );
+            })()
+          ) : (
+            <span className='posting-item__criteria-val'>
+              {typeof val === 'object' ? JSON.stringify(val) : String(val)}
+            </span>
+          )}
         </div>
       ))}
     </div>
@@ -106,11 +181,13 @@ function RankingDetails({ ranking }: RankingDetailsProps) {
       </p>
       <CriteriaMatchDetails value={ranking.criteriaMatchJson} />
       {ranking.redFlags && ranking.redFlags.length > 0 ? (
-        <ul className='posting-item__red-flags'>
-          {ranking.redFlags.map((flag) => (
-            <li key={flag}>{flag}</li>
+        <div className='posting-item__red-flags' aria-label='Red flags'>
+          {ranking.redFlags.map((flag, index) => (
+            <span key={`${flag}-${index}`} className='posting-item__criteria-badge posting-item__criteria-badge--red'>
+              {flag}
+            </span>
           ))}
-        </ul>
+        </div>
       ) : null}
     </div>
   );
@@ -211,6 +288,8 @@ export function PostingTable({
           <ul className='posting-list'>
             {postings!.map((posting) => {
               const description = formatDescriptionPreview(posting.descriptionSnippet);
+              const scoreOverall = posting.latestRanking?.scoreOverall;
+              const scoreColorClass = getScoreColorClass(scoreOverall);
               return (
                 <li key={posting._id}>
                   <article className='posting-item' aria-label={`Posting: ${posting.title}`}>
@@ -257,18 +336,17 @@ export function PostingTable({
                       </div>
                     ) : null}
                     <div className='posting-item__meta'>
-                      <span className='posting-item__meta-field'>
-                        <span className='posting-item__meta-label'>Score</span>{' '}
-                        {posting.latestRanking?.scoreOverall ?? '-'}
+                      <span className={`posting-item__meta-field posting-item__meta-score ${scoreColorClass}`}>
+                        {scoreOverall ?? '-'}
                       </span>
-                      <span className='posting-item__meta-field posting-item__meta-role'>
-                        <span className='posting-item__meta-label'>Role</span>{' '}
+                      <span className='posting-item__meta-field posting-item__meta-role-company'>
                         <a href={posting.url} target='_blank' rel='noreferrer'>
                           {posting.title}
                         </a>
+                        {` - ${posting.company}`}
                       </span>
                       <span className='posting-item__meta-field'>
-                        <span className='posting-item__meta-label'>Company</span> {posting.company}
+                        <span className='posting-item__meta-label'>Salary</span> {posting.salaryText ?? '-'}
                       </span>
                       <span className='posting-item__meta-field'>
                         <span className='posting-item__meta-label'>Source</span> {posting.source}

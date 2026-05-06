@@ -8,7 +8,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - Criteria profiles (`apps/web/src/components/CriteriaEditor.tsx`): multiple named profiles, optional **Resume (Markdown)** and **Ranking prompt** for the LLM, **Notes** (private — not sent to the ranker), and one **Active** profile for defaults
 - Postings viewer (`apps/web/src/components/PostingViewer.tsx`) with:
   - humanized discovered timestamps (same-day time, older relative age)
-  - postings shown as a **list** (`PostingTable.tsx`): each item has a meta row (score, role, company, source, location, ranked/discovered, actions), a description preview, and latest ranking details (reasoning, model, criteria match, red flags)
+  - postings shown as a **list** (`PostingTable.tsx`): each item has a compact meta row (color-coded score, `<position> - <company>`, source, location, ranked/discovered, actions), a description preview, and latest ranking details (reasoning, model, criteria match, red flags)
   - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes, bulk `Score selected` / `Delete selected`, and `Clear All`
   - bulk score uses one batched LLM prompt/request per provider path (shared criteria context + all selected postings) to reduce token usage
 - detailed modal view (human-readable fields + raw JSON), including latest reasoning summary rendered as markdown (supports tables/lists from LLM output)
