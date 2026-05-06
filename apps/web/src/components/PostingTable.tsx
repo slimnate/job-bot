@@ -1,24 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { formatHumanizedTime } from '../lib/time';
-import type { Id } from '../../../../convex/_generated/dataModel.js';
+import type { Doc } from '../../../../convex/_generated/dataModel.js';
 
-export type PostingTableRow = {
-  _id: Id<'job_postings'>;
-  externalId: string;
-  url: string;
-  title: string;
-  company: string;
-  source: string;
-  location?: string;
-  salaryText?: string;
-  descriptionSnippet?: string;
-  postedAt?: number;
-  discoveredAt: number;
-  createdAt: number;
-  updatedAt: number;
-  scrapeRunId?: string;
-  rawPayload?: unknown;
-  latestRanking: { scoreOverall: number; rankedAt: number } | null;
+export type PostingTableRow = Doc<'job_postings'> & {
+  latestRanking: Doc<'job_rankings'> | null;
 };
 
 const formatDateTime = (timestamp?: number): string => {
@@ -31,7 +18,7 @@ const formatDateTime = (timestamp?: number): string => {
 const DESCRIPTION_PREVIEW_MAX_CHARS = 140;
 
 /**
- * Keeps table rows scannable while preserving the full text in a tooltip.
+ * Keeps description previews scannable while preserving the full text in a tooltip.
  */
 const formatDescriptionPreview = (descriptionSnippet?: string): { preview: string; full: string } => {
   const full = (descriptionSnippet ?? '').trim();
@@ -43,6 +30,91 @@ const formatDescriptionPreview = (descriptionSnippet?: string): { preview: strin
   }
   return { preview: `${full.slice(0, DESCRIPTION_PREVIEW_MAX_CHARS - 1)}…`, full };
 };
+
+/**
+ * Renders `criteriaMatchJson` as compact labeled lines when it is a non-array object.
+ */
+function CriteriaMatchDetails({ value }: { value: unknown }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, v]) => v !== undefined && v !== null && v !== ''
+  );
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <div className='posting-item__criteria'>
+      {entries.map(([key, val]) => (
+        <div key={key} className='posting-item__criteria-row'>
+          <span className='posting-item__criteria-key'>{key}</span>
+          <span className='posting-item__criteria-val'>
+            {typeof val === 'object' ? JSON.stringify(val) : String(val)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type RankingDetailsProps = {
+  ranking: Doc<'job_rankings'> | null;
+};
+
+type ReasoningMarkdownProps = {
+  value?: string | null;
+  className?: string;
+};
+
+/**
+ * Renders LLM reasoning as markdown with GFM tables enabled.
+ */
+function ReasoningMarkdown({ value, className }: ReasoningMarkdownProps) {
+  const content = value?.trim();
+  if (!content) {
+    return <span className={className}>-</span>;
+  }
+  return (
+    <div className={className}>
+      <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+    </div>
+  );
+}
+
+/**
+ * Third row of each posting card: model, reasoning, criteria breakdown, red flags.
+ */
+function RankingDetails({ ranking }: RankingDetailsProps) {
+  if (!ranking) {
+    return (
+      <div className='posting-item__ranking'>
+        <p className='posting-item__ranking-empty'>Not ranked yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className='posting-item__ranking'>
+      <ReasoningMarkdown value={ranking.reasoningSummary} className='posting-item__reasoning' />
+      <p className='posting-item__model-line'>
+        <span className='posting-item__model-label'>Model</span> {ranking.model}
+        <span className='posting-item__meta-sep' aria-hidden='true'>
+          ·
+        </span>
+        <span className='posting-item__model-label'>Rank</span> {ranking.rank}
+      </p>
+      <CriteriaMatchDetails value={ranking.criteriaMatchJson} />
+      {ranking.redFlags && ranking.redFlags.length > 0 ? (
+        <ul className='posting-item__red-flags'>
+          {ranking.redFlags.map((flag) => (
+            <li key={flag}>{flag}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 type PostingTableProps = {
   postings: PostingTableRow[] | undefined;
@@ -71,8 +143,7 @@ export function PostingTable({
   const [selectedPostingId, setSelectedPostingId] = useState<string | null>(null);
   const [rawJsonCopyStatus, setRawJsonCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
   const allVisibleSelected = Boolean(
-    postings?.length &&
-      postings.every((posting) => selectedPostingIds?.has(posting._id))
+    postings?.length && postings.every((posting) => selectedPostingIds?.has(posting._id))
   );
   const selectedPosting = useMemo(
     () => postings?.find((posting) => posting._id === selectedPostingId) ?? null,
@@ -118,101 +189,118 @@ export function PostingTable({
     }
   };
 
+  const hasRows = Boolean(postings?.length);
+
   return (
     <>
       <div className='table-wrapper'>
-        <table>
-          <thead>
-            <tr>
-              {showSelection ? (
-                <th className='select-cell'>
-                  <input
-                    type='checkbox'
-                    aria-label='Select all visible postings'
-                    checked={allVisibleSelected}
-                    onChange={(event) => onToggleSelectAllVisible?.(event.target.checked)}
-                  />
-                </th>
-              ) : null}
-              <th>Score</th>
-              <th>Role</th>
-              <th>Company</th>
-              <th>Description</th>
-              <th>Source</th>
-              <th>Location</th>
-              <th className='timestamp-cell'>Ranked</th>
-              <th className='timestamp-cell'>Discovered</th>
-              {showActions ? <th>Actions</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {postings?.length ? (
-              postings.map((posting) => {
-                const description = formatDescriptionPreview(posting.descriptionSnippet);
-                return (
-                  <tr key={posting._id}>
-                    {showSelection ? (
-                      <td className='select-cell'>
-                        <input
-                          type='checkbox'
-                          aria-label={`Select ${posting.title}`}
-                          checked={Boolean(selectedPostingIds?.has(posting._id))}
-                          onChange={(event) =>
-                            onTogglePostingSelection?.(posting._id, event.target.checked)
-                          }
-                        />
-                      </td>
+        {showSelection ? (
+          <div className='posting-list-toolbar'>
+            <label className='posting-list-select-all'>
+              <input
+                type='checkbox'
+                aria-label='Select all visible postings'
+                checked={allVisibleSelected}
+                onChange={(event) => onToggleSelectAllVisible?.(event.target.checked)}
+              />
+              <span>Select all visible</span>
+            </label>
+          </div>
+        ) : null}
+        {hasRows ? (
+          <ul className='posting-list'>
+            {postings!.map((posting) => {
+              const description = formatDescriptionPreview(posting.descriptionSnippet);
+              return (
+                <li key={posting._id}>
+                  <article className='posting-item' aria-label={`Posting: ${posting.title}`}>
+                    {showSelection || showActions ? (
+                      <div className='posting-item__controls'>
+                        {showSelection ? (
+                          <span className='posting-item__controls-selection'>
+                            <input
+                              type='checkbox'
+                              aria-label={`Select ${posting.title}`}
+                              checked={Boolean(selectedPostingIds?.has(posting._id))}
+                              onChange={(event) =>
+                                onTogglePostingSelection?.(posting._id, event.target.checked)
+                              }
+                            />
+                          </span>
+                        ) : null}
+                        {showActions ? (
+                          <span className='posting-item__controls-actions'>
+                            <button type='button' onClick={() => setSelectedPostingId(posting._id)}>
+                              View
+                            </button>
+                            {onOpenScoreDialog ? (
+                              <button
+                                type='button'
+                                className='btn-success'
+                                onClick={() => onOpenScoreDialog(posting)}
+                              >
+                                Score
+                              </button>
+                            ) : null}
+                            {onDeletePosting ? (
+                              <button
+                                type='button'
+                                className='btn-danger'
+                                onClick={() => void onDelete(posting)}
+                                disabled={deletingPostingId === posting._id}
+                              >
+                                {deletingPostingId === posting._id ? 'Deleting…' : 'Delete'}
+                              </button>
+                            ) : null}
+                          </span>
+                        ) : null}
+                      </div>
                     ) : null}
-                    <td>{posting.latestRanking?.scoreOverall ?? '-'}</td>
-                    <td>
-                      <a href={posting.url} target='_blank' rel='noreferrer'>
-                        {posting.title}
-                      </a>
-                    </td>
-                    <td>{posting.company}</td>
-                    <td className='description-snippet-cell' title={description.full || undefined}>
+                    <div className='posting-item__meta'>
+                      <span className='posting-item__meta-field'>
+                        <span className='posting-item__meta-label'>Score</span>{' '}
+                        {posting.latestRanking?.scoreOverall ?? '-'}
+                      </span>
+                      <span className='posting-item__meta-field posting-item__meta-role'>
+                        <span className='posting-item__meta-label'>Role</span>{' '}
+                        <a href={posting.url} target='_blank' rel='noreferrer'>
+                          {posting.title}
+                        </a>
+                      </span>
+                      <span className='posting-item__meta-field'>
+                        <span className='posting-item__meta-label'>Company</span> {posting.company}
+                      </span>
+                      <span className='posting-item__meta-field'>
+                        <span className='posting-item__meta-label'>Source</span> {posting.source}
+                      </span>
+                      <span className='posting-item__meta-field'>
+                        <span className='posting-item__meta-label'>Location</span>{' '}
+                        {posting.location ?? '-'}
+                      </span>
+                      <span className='posting-item__meta-field posting-item__meta-time'>
+                        <span className='posting-item__meta-label'>Ranked</span>{' '}
+                        {formatHumanizedTime(posting.latestRanking?.rankedAt)}
+                      </span>
+                      <span className='posting-item__meta-field posting-item__meta-time'>
+                        <span className='posting-item__meta-label'>Discovered</span>{' '}
+                        {formatHumanizedTime(posting.discoveredAt)}
+                      </span>
+                    </div>
+                    <div
+                      className='posting-item__description'
+                      title={description.full || undefined}
+                    >
                       {description.preview}
-                    </td>
-                    <td>{posting.source}</td>
-                    <td>{posting.location ?? '-'}</td>
-                    <td className='timestamp-cell'>{formatHumanizedTime(posting.latestRanking?.rankedAt)}</td>
-                    <td className='timestamp-cell'>{formatHumanizedTime(posting.discoveredAt)}</td>
-                    {showActions ? (
-                      <td className='queue-actions-cell'>
-                        <button type='button' onClick={() => setSelectedPostingId(posting._id)}>
-                          View
-                        </button>
-                        {onOpenScoreDialog ? (
-                          <button
-                            type='button'
-                            className='btn-success'
-                            onClick={() => onOpenScoreDialog(posting)}
-                          >
-                            Score
-                          </button>
-                        ) : null}
-                        {onDeletePosting ? (
-                          <button
-                            type='button'
-                            className='btn-danger'
-                            onClick={() => void onDelete(posting)}
-                            disabled={deletingPostingId === posting._id}
-                          >
-                            {deletingPostingId === posting._id ? 'Deleting…' : 'Delete'}
-                          </button>
-                        ) : null}
-                      </td>
-                    ) : null}
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={showSelection ? (showActions ? 10 : 9) : showActions ? 9 : 8}>{emptyMessage}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                    </div>
+                    <RankingDetails ranking={posting.latestRanking} />
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className='posting-list-empty'>{emptyMessage}</p>
+        )}
       </div>
       {selectedPosting ? (
         <div className='modal-overlay' onClick={closeModal} role='presentation'>
@@ -239,6 +327,13 @@ export function PostingTable({
                 <dd>{formatDateTime(selectedPosting.discoveredAt)}</dd>
                 <dt>Latest score</dt>
                 <dd>{selectedPosting.latestRanking?.scoreOverall ?? '-'}</dd>
+                <dt>Latest reasoning</dt>
+                <dd>
+                  <ReasoningMarkdown
+                    value={selectedPosting.latestRanking?.reasoningSummary}
+                    className='details-grid__markdown'
+                  />
+                </dd>
                 <dt>Created</dt>
                 <dd>{formatDateTime(selectedPosting.createdAt)}</dd>
                 <dt>Updated</dt>

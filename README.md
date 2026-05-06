@@ -8,9 +8,10 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - Criteria profiles (`apps/web/src/components/CriteriaEditor.tsx`): multiple named profiles, optional **Resume (Markdown)** and **Ranking prompt** for the LLM, **Notes** (private — not sent to the ranker), and one **Active** profile for defaults
 - Postings viewer (`apps/web/src/components/PostingViewer.tsx`) with:
   - humanized discovered timestamps (same-day time, older relative age)
-  - per-row actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), first-column multi-select checkboxes, bulk `Score selected` / `Delete selected`, and `Clear All`
+  - postings shown as a **list** (`PostingTable.tsx`): each item has a meta row (score, role, company, source, location, ranked/discovered, actions), a description preview, and latest ranking details (reasoning, model, criteria match, red flags)
+  - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes, bulk `Score selected` / `Delete selected`, and `Clear All`
   - bulk score uses one batched LLM prompt/request per provider path (shared criteria context + all selected postings) to reduce token usage
-  - detailed modal view (human-readable fields + raw JSON)
+- detailed modal view (human-readable fields + raw JSON), including latest reasoning summary rendered as markdown (supports tables/lists from LLM output)
 - Workers (`/workers`) queue + history (`apps/web/src/components/HistoryViewer.tsx`, `apps/web/src/components/ScrapeQueuePanel.tsx`) with:
   - status color coding (`queued` blue, `running` yellow, `succeeded` green, `failed`/`cancelled` red)
   - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
@@ -35,9 +36,9 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 1. User creates or edits criteria profiles in the web app (resume + ranking prompt drive how the LLM ranks jobs; notes are for the user only).
 2. Runs are queued either:
    - manually from the dashboard (`runs.trigger`), optionally with an explicit `source` and `criteriaId`, or
-   - automatically by the worker scheduler (defaults to **`manual`** source only; scrape sources are no longer read from criteria).
+   - automatically by the worker scheduler (defaults to **`linkedin`** source only; scrape sources are no longer read from criteria).
 3. Worker dequeues runs with bounded concurrency.
-4. Worker collects postings for a source (current deterministic seed adapter).
+4. Worker collects postings for a source (**LinkedIn implemented**; unsupported sources fail fast to avoid placeholder data pollution).
 5. Worker upserts postings in Convex (`postings.upsertBatch`).
 6. Worker computes LLM ranking using the **run’s** `criteriaId` when set (otherwise the active profile) and persists results (`ranking.upsertResults`).
 7. Worker marks run status and stats (`runs.updateStatus`).

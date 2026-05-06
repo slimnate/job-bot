@@ -67,8 +67,8 @@ export const trigger = mutation({
         .withIndex('by_is_active', (q) => q.eq('isActive', true))
         .first());
 
-    /** Sources are no longer read from criteria; pass `source` explicitly or default to manual. */
-    const resolvedSources = args.source ? [args.source] : ['manual'];
+    /** Sources are no longer read from criteria; pass `source` explicitly or default to LinkedIn. */
+    const resolvedSources = args.source ? [args.source] : ['linkedin'];
 
     const triggerRuns: Array<{ runId: Id<'scrape_runs'>; source: string }> = [];
     const runIds: Id<'scrape_runs'>[] = [];

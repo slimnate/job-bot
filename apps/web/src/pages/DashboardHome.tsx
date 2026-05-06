@@ -46,7 +46,7 @@ export function DashboardHome() {
         <div className='panel-heading'>
           <h2>Top postings by score</h2>
         </div>
-        <p className='panel-subtitle'>Showing up to 10. Visit ranked postings for the full table.</p>
+        <p className='panel-subtitle'>Showing up to 10. Visit ranked postings for the full list.</p>
         <PostingTable
           postings={previewPostings}
           emptyMessage={previewPostings === undefined ? 'Loading…' : 'No postings yet.'}

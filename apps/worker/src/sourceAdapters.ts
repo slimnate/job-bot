@@ -6,8 +6,6 @@ import type { ScrapedPostingInput, ScrapeResult, ScrapeStats } from './scrapeTyp
 
 export type { ScrapeResult, ScrapeStats } from './scrapeTypes.js';
 
-const hourMs = 60 * 60 * 1000;
-
 export async function collectPostingsForSource(params: {
   runId: Id<'scrape_runs'>;
   source: string;
@@ -15,7 +13,6 @@ export async function collectPostingsForSource(params: {
   /** LinkedIn: upsert each posting as soon as it is scraped (orchestrator only). */
   streamPosting?: (posting: ScrapedPostingInput) => Promise<void>;
 }): Promise<ScrapeResult> {
-  const now = Date.now();
   const normalizedSource = params.source.trim().toLowerCase();
 
   if (normalizedSource === 'linkedin') {
@@ -37,42 +34,11 @@ export async function collectPostingsForSource(params: {
     });
   }
 
-  const postings: ScrapedPostingInput[] = [
-    {
-      source: normalizedSource,
-      externalId: `${normalizedSource}-core-platform-1`,
-      url: `https://${normalizedSource}.example/jobs/core-platform-engineer`,
-      title: 'Software Engineer, Platform',
-      company: 'Acme Labs',
-      location: 'Remote',
-      salaryText: '$130k - $170k',
-      descriptionSnippet: 'Build backend services, data pipelines, and cloud automation.',
-      postedAt: now - (8 * hourMs),
-      discoveredAt: now,
-      scrapeRunId: params.runId,
-      rawPayload: { provider: 'seed-adapter', source: normalizedSource },
-    },
-    {
-      source: normalizedSource,
-      externalId: `${normalizedSource}-frontend-2`,
-      url: `https://${normalizedSource}.example/jobs/frontend-typescript`,
-      title: 'Frontend Engineer (TypeScript)',
-      company: 'Signal Works',
-      location: 'Hybrid - NYC',
-      descriptionSnippet: 'Ship product UI with React, TypeScript, and robust testing.',
-      postedAt: now - (30 * hourMs),
-      discoveredAt: now,
-      scrapeRunId: params.runId,
-      rawPayload: { provider: 'seed-adapter', source: normalizedSource },
-    },
-  ];
-
-  return {
-    postings,
-    stats: {
-      discoveredCount: postings.length,
-      // We cannot know dedupe count before DB upsert, leave at zero for now.
-      dedupedCount: 0,
-    },
-  };
+  /**
+   * We intentionally fail fast for unsupported sources so the worker never inserts
+   * synthetic placeholder rows into real postings data.
+   */
+  throw new Error(
+    `Unsupported scrape source '${normalizedSource}'. Only 'linkedin' is implemented in the worker source adapter.`
+  );
 }

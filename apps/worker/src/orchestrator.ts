@@ -89,7 +89,7 @@ export class WorkerOrchestrator {
       triggered.runs ??
       triggered.runIds.map((runId: Id<'scrape_runs'>) => ({
         runId,
-        source: input.source ?? 'manual',
+        source: input.source ?? 'linkedin',
       }));
 
     for (const entry of entries) {
@@ -166,14 +166,14 @@ export class WorkerOrchestrator {
     );
 
     if (!activeCriteria) {
-      await this.triggerAndEnqueue({ source: 'manual' });
+      await this.triggerAndEnqueue({ source: 'linkedin' });
       return;
     }
 
-    /** Criteria no longer lists scrape sources; scheduled runs default to manual only. */
+    /** Criteria no longer lists scrape sources; scheduled runs default to LinkedIn only. */
     await this.triggerAndEnqueue({
       criteriaId: (activeCriteria as Doc<'job_criteria'>)._id,
-      source: 'manual',
+      source: 'linkedin',
     });
   }
 

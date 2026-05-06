@@ -7,7 +7,7 @@ import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 const formatDateTime = (timestamp: number): string => new Date(timestamp).toLocaleString();
 
 /** Known scrape sources for the queue UI (backend accepts any non-empty string). */
-const QUEUE_SOURCE_OPTIONS = ['manual', 'linkedin', 'greenhouse', 'lever'] as const;
+const QUEUE_SOURCE_OPTIONS = ['linkedin', 'greenhouse', 'lever'] as const;
 
 function isLinkedInSource(source: string): boolean {
   return source.trim().toLowerCase() === 'linkedin';
@@ -24,7 +24,7 @@ export function ScrapeQueuePanel() {
   const updateQueued = useMutation(api.runs.updateQueued);
   const updateStatus = useMutation(api.runs.updateStatus);
 
-  const [newSource, setNewSource] = useState('manual');
+  const [newSource, setNewSource] = useState('linkedin');
   const [newLinkedinQuery, setNewLinkedinQuery] = useState('');
   const [newCriteriaId, setNewCriteriaId] = useState('');
   const [queueMessage, setQueueMessage] = useState('');

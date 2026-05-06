@@ -1,29 +1,11 @@
 import { mutation, query } from './_generated/server.js';
 import { api } from './_generated/api.js';
 import { v } from 'convex/values';
-import type { Id } from './_generated/dataModel.js';
+import type { Doc } from './_generated/dataModel.js';
 
-type PostingWithRanking = {
-  _id: Id<'job_postings'>;
-  _creationTime: number;
-  source: string;
-  externalId: string;
-  url: string;
-  title: string;
-  company: string;
-  location?: string;
-  salaryText?: string;
-  descriptionSnippet?: string;
-  postedAt?: number;
-  discoveredAt: number;
-  scrapeRunId?: Id<'scrape_runs'>;
-  rawPayload?: unknown;
-  createdAt: number;
-  updatedAt: number;
-  latestRanking: {
-    scoreOverall: number;
-    rankedAt: number;
-  } | null;
+/** Posting row returned by `list`, with the latest `job_rankings` document attached (or null). */
+type PostingWithRanking = Doc<'job_postings'> & {
+  latestRanking: Doc<'job_rankings'> | null;
 };
 
 const postingInputValidator = v.object({

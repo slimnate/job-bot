@@ -359,6 +359,229 @@ button.btn-success:hover:not(:disabled) {
   overflow: auto;
 }
 
+/* Postings list (card rows; replaces former postings table layout) */
+.posting-list-toolbar {
+  padding: 0.35rem 0 0.6rem;
+  border-bottom: 1px solid #1f2937;
+}
+
+.posting-list-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: #9ca3af;
+  cursor: pointer;
+  margin: 0;
+}
+
+.posting-list-select-all input {
+  margin: 0;
+}
+
+.posting-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.posting-item {
+  border-bottom: 1px solid #1f2937;
+  padding: 0.55rem 0;
+}
+
+.posting-item__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.posting-item__controls-selection {
+  flex-shrink: 0;
+}
+
+.posting-item__controls-selection input {
+  margin: 0;
+  vertical-align: middle;
+}
+
+.posting-item__controls-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin-left: auto;
+}
+
+.posting-item__controls-actions button {
+  margin: 0;
+}
+
+.posting-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  margin-bottom: 0.4rem;
+}
+
+.posting-item__meta-field {
+  font-size: 0.88rem;
+}
+
+.posting-item__meta-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #9ca3af;
+}
+
+.posting-item__meta-role {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.posting-item__meta-role a {
+  word-break: break-word;
+}
+
+.posting-item__meta-time {
+  white-space: nowrap;
+}
+
+.posting-item__description {
+  font-size: 0.86rem;
+  color: #cbd5e1;
+  line-height: 1.45;
+  margin-bottom: 0.45rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.posting-item__ranking {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.posting-item__ranking-empty {
+  margin: 0;
+  font-style: italic;
+  color: #64748b;
+}
+
+.posting-item__reasoning {
+  margin: 0 0 0.35rem;
+  color: #cbd5e1;
+  overflow-x: auto;
+}
+
+.posting-item__reasoning > :first-child {
+  margin-top: 0;
+}
+
+.posting-item__reasoning > :last-child {
+  margin-bottom: 0;
+}
+
+.posting-item__reasoning p,
+.posting-item__reasoning li {
+  word-break: break-word;
+}
+
+.posting-item__reasoning table,
+.details-grid__markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.35rem 0;
+}
+
+.posting-item__reasoning th,
+.posting-item__reasoning td,
+.details-grid__markdown th,
+.details-grid__markdown td {
+  border: 1px solid #334155;
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.posting-item__reasoning th,
+.details-grid__markdown th {
+  color: #d1d5db;
+  background: rgba(30, 41, 59, 0.45);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
+.posting-item__reasoning td,
+.details-grid__markdown td {
+  color: #cbd5e1;
+  word-break: break-word;
+}
+
+.posting-item__model-line {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  color: #9ca3af;
+}
+
+.posting-item__model-label {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-size: 0.72rem;
+}
+
+.posting-item__meta-sep {
+  margin: 0 0.35rem;
+  opacity: 0.7;
+}
+
+.posting-item__criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0 0 0.35rem;
+}
+
+.posting-item__criteria-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  align-items: baseline;
+}
+
+.posting-item__criteria-key {
+  font-weight: 600;
+  color: #a8b4c4;
+}
+
+.posting-item__criteria-val {
+  word-break: break-word;
+}
+
+.posting-item__red-flags {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #fca5a5;
+}
+
+.posting-item__red-flags li {
+  margin: 0.15rem 0;
+}
+
+.posting-list-empty {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  color: #9ca3af;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -597,6 +820,23 @@ thead th {
 
 .details-grid dd {
   margin: 0;
+}
+
+.details-grid__markdown {
+  overflow-x: auto;
+}
+
+.details-grid__markdown > :first-child {
+  margin-top: 0;
+}
+
+.details-grid__markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.details-grid__markdown p,
+.details-grid__markdown li {
+  word-break: break-word;
 }
 
 .run-detail-meta {

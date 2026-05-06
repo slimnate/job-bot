@@ -1,8 +1,8 @@
 # Job description scoring rubric (draft v0.2)
 
-**Purpose:** Score each posting **1–100** so you can triage applications, compare opportunities, and stay aligned with your stated goals.
+**Purpose:** Score each posting **1–100** so I can triage applications, compare opportunities, and focus applications on relevant roles
 
-**How to use:** Score each dimension independently, then **sum**. Optionally note a **confidence** (high/medium/low) when the posting is vague. Re-score after a recruiter screen if new facts appear.
+**How to use:** Score each dimension independently, then **sum**. Optionally note a **confidence** (high/medium/low) when the posting is vague.
 
 **Calibration:** Treat **70+** as strong apply priority, **55–69** as worth applying with tailored materials, **40–54** as backup tier, **<40** as usually skip unless strategic (network, practice, dream company).
 
@@ -28,7 +28,7 @@ How well does the **primary day-to-day stack** overlap what you already ship in 
 - Use this to break ties between otherwise similar React/Node postings.
 - **.NET guidance:** Treat **.NET-heavy roles** as a solid but secondary fit unless the posting also includes meaningful modern web frontend/backend work.
 
-**Your evidence base:** Spotlite (SvelteKit, Tailwind, Convex, WorkOS), Cerner (Node, C#/WPF, MongoDB, REST, Socket.IO), Keeper (React), npm libraries, side projects.
+**Your evidence base:** Spotlite (SvelteKit, Tailwind, Convex, WorkOS), Cerner (Node, C#/WPF, MongoDB, REST, Socket.IO), Keeper (React), npm libraries, side projects.s
 
 ---
 
@@ -57,7 +57,6 @@ Does the **work resemble** what energizes you in your letters and resume (owners
 | 5–8 | **Narrow ticket factory** only, or role is mostly **ops/NOC** without a dev path (unless you explicitly want that track). |
 | 0–4 | Role is **pure sales engineering**, unrelated to building software you’d showcase. |
 
-**Note:** Your Savion letter emphasizes **internal tools + efficiency + environmental impact**—boost scores when the JD echoes that; your Carrot/Honeywell threads show general **software engineer** interest.
 
 ---
 
@@ -112,31 +111,22 @@ If the posting is **honest and concise**, keep **13–15** here.
 
 ---
 
-## Quick worksheet (optional scratch per posting)
+## Reasoning summary format
 
-Use this only as a thinking aid—not as a required output format for any system.
+Use this format in the reasoning summary. Replace each `x` with the determined score value for that step. Replace the `___` with the details about why.
 
 ```
-Company:
-Title:
+| score | ranking criteria | details |
+|---|---|---|
+| x/25 | Technical fit | ___ |
+| x/20 | Level realism | ___ |
+| x/15 | Work style & scope | ___ |
+| x/10 | Comp & transparency | ___ |
+| x/10 | Location & logistics | ___ |
+| x/5 | Mission resonance | ___ |
+| x/15 | Process & red flags | ___ (start at 15, subtract) |
 
-1. Technical fit (/25): ___
-2. Level realism (/20): ___
-3. Work style & scope (/15): ___
-4. Comp & transparency (/10): ___
-5. Location & logistics (/10): ___
-6. Mission resonance (/5): ___
-7. Process & red flags (/15): ___  (start 15, subtract)
+TOTAL: (x/100)
 
-TOTAL (/100): ___
+<any other relevant information that doesn't fit anywhere else>
 ```
-
----
-
-## Open questions for refinement (next)
-
-Answer these to tighten weights and anchors:
-
-1. **.NET/C# weighting** — Keep as a secondary fit (current approach), or add explicit +1 when role is modern .NET web with frontend exposure?
-2. **Mission weighting** — Keep mission at **5** points, or move some/all points into comp/process dimensions?
-3. **Calibration bands** — Keep `70+ apply now`, `55–69 apply if strategic`, or tighten thresholds after scoring 20 real JDs?
