@@ -35,10 +35,9 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 
 1. User creates or edits criteria profiles in the web app (resume + ranking prompt drive how the LLM ranks jobs; notes are for the user only).
 2. Runs are queued either:
-   - manually from the dashboard (`runs.trigger`), optionally with an explicit `source` and `criteriaId`, or
-   - automatically by the worker scheduler (defaults to **`linkedin`** source only; scrape sources are no longer read from criteria).
+   - manually from the dashboard (`runs.trigger`), optionally with an explicit `source` and `criteriaId`.
 3. Worker dequeues runs with bounded concurrency.
-4. Worker collects postings for a source (**LinkedIn implemented**; unsupported sources fail fast to avoid placeholder data pollution).
+4. Worker collects postings for a source (**LinkedIn implemented**; unsupported sources fail fast to avoid placeholder data pollution). LinkedIn scrape cleanup tears down Chrome after each run.
 5. Worker upserts postings in Convex (`postings.upsertBatch`).
 6. Worker computes LLM ranking using the **run’s** `criteriaId` when set (otherwise the active profile) and persists results (`ranking.upsertResults`).
 7. Worker marks run status and stats (`runs.updateStatus`).
@@ -132,7 +131,7 @@ Worker-specific optional env vars:
 - `WORKER_LINKEDIN_DEBUG_STEPS` (default: off / `none` if unset): `none` | `coarse` | `fine` — after the browser reaches the jobs shell, a **fixed strip along the top** of the viewport is injected. **`none`**: a slim bar with **Finish & rank** (same behavior as the full bar — stop listing and continue the run into ranking with jobs collected so far) and **Abort** (cancel without ranking); no stepped **Continue** phases. **`coarse`** / **`fine`**: full bar with **Finish & rank**, **Continue**, and **Abort** — **Continue** advances stepped phases. While scraping (including `fine` steps), each job is upserted into Convex as soon as it is captured so the web UI updates live (final batch upsert still runs for consistency). `coarse` pauses at major phases and before pagination; `fine` also pauses after each job with title + 100-character description preview. Set this in `.env.local` (for example `fine` while iterating). **Important:** Node’s `--env-file` does **not** override variables already set in the process environment, so a shell export of `WORKER_LINKEDIN_DEBUG_STEPS=…` would ignore your `.env.local` value for that key until you unset it or remove the export.
 - `WORKER_QUEUE_CONCURRENCY` (default: `2`): multiple sources can run in parallel, but **LinkedIn scrapes are serialized** in the worker (one shared Chrome tab/CDP session) so two LinkedIn jobs never navigate at once.
 - `WORKER_CRON_INTERVAL_MINUTES` (default: `15`)
-- `WORKER_RUN_ON_START` (default: `true`)
+- `WORKER_RUN_ON_START` (default: `true`): controls whether the scheduler immediately checks for already queued runs on worker boot; it does **not** auto-create new scrape runs.
 - `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS` (optional): max time in milliseconds that `npm run trigger:linkedin` polls Convex for the LinkedIn run to finish (default **45 minutes**).
 - `LLM_RANKING_PROVIDER` (default: `cursor`; options: `cursor`, `http`)
 - `LLM_RANKING_MODEL` (provider model label/override)

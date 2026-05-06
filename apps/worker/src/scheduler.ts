@@ -51,8 +51,11 @@ export class WorkerScheduler {
     const job = this.tail.then(async () => {
       const tickStartedAt = Date.now();
       try {
+        /**
+         * Manual queueing mode: only consume runs that already exist in Convex queue.
+         * Do not auto-create new runs from scheduler ticks.
+         */
         await this.orchestrator.enqueueDbQueuedRuns();
-        await this.orchestrator.enqueueScheduledRuns();
         const snapshot = this.orchestrator.queueSnapshot();
         workerLog.info('scheduler.tick.complete', {
           trigger,

@@ -92,6 +92,11 @@ export class WorkerChromeSession {
     return this.driver;
   }
 
+  /** True when the worker is configured to spawn and own the Chrome process. */
+  isManagedChrome(): boolean {
+    return this.options.manageChrome;
+  }
+
   /**
    * Chrome can exit while the worker keeps running; CDP then throws "WebSocket is not open".
    * Call this before LinkedIn (CDP) scrapes so we reconnect or respawn managed Chrome as needed.
@@ -231,6 +236,28 @@ export class WorkerChromeSession {
     }
     workerLog.info('chrome.session', { phase: 'stopped' });
   }
+
+  /**
+   * End-of-run LinkedIn cleanup:
+   * - managed Chrome: fully stop the spawned browser process
+   * - attached Chrome: disconnect CDP only (do not kill a user-owned browser)
+   */
+  async closeAfterLinkedInScrape(): Promise<void> {
+    if (!this.options.enabled) {
+      return;
+    }
+    if (this.options.manageChrome) {
+      await this.stop();
+      return;
+    }
+
+    await this.driver.disconnect().catch(() => {});
+    this.started = false;
+    workerLog.info('chrome.session', {
+      phase: 'detached_after_scrape',
+      port: this.options.port,
+    });
+  }
 }
 
 let sharedSession: WorkerChromeSession | null = null;
@@ -260,4 +287,11 @@ export function getWorkerChromeDriver(): ChromeDriver | null {
 /** No-op if Chrome is disabled or no session; otherwise reconnects CDP / respawns Chrome if needed. */
 export async function ensureWorkerChromeForLinkedIn(): Promise<void> {
   await sharedSession?.ensureReadyForScrape();
+}
+
+/**
+ * Per-run teardown for LinkedIn scrapes. Safe to call even if Chrome is disabled.
+ */
+export async function closeWorkerChromeAfterLinkedInScrape(): Promise<void> {
+  await sharedSession?.closeAfterLinkedInScrape();
 }

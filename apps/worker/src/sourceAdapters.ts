@@ -1,4 +1,8 @@
-import { ensureWorkerChromeForLinkedIn, getWorkerChromeDriver } from './chromeSession.js';
+import {
+  closeWorkerChromeAfterLinkedInScrape,
+  ensureWorkerChromeForLinkedIn,
+  getWorkerChromeDriver,
+} from './chromeSession.js';
 import type { Id } from './convexBridge/doc.js';
 import { withLinkedInBrowserExclusive } from './linkedinBrowserLock.js';
 import { collectLinkedInPostings } from './sources/linkedinJobs.js';
@@ -17,20 +21,24 @@ export async function collectPostingsForSource(params: {
 
   if (normalizedSource === 'linkedin') {
     return withLinkedInBrowserExclusive(async () => {
-      await ensureWorkerChromeForLinkedIn();
-      const driver = getWorkerChromeDriver();
-      if (!driver) {
-        throw new Error(
-          'LinkedIn scraping requires Chrome with CDP. Set WORKER_USE_CHROME=1 (and usually WORKER_CHROME_HEADLESS=0 for login); `npm run dev:all` sets these on the worker. Chrome starts when the first LinkedIn scrape runs, not at worker boot. To attach your own browser instead of spawning one, set WORKER_MANAGE_CHROME=0 and use WORKER_CHROME_PORT.'
-        );
+      try {
+        await ensureWorkerChromeForLinkedIn();
+        const driver = getWorkerChromeDriver();
+        if (!driver) {
+          throw new Error(
+            'LinkedIn scraping requires Chrome with CDP. Set WORKER_USE_CHROME=1 (and usually WORKER_CHROME_HEADLESS=0 for login); `npm run dev:all` sets these on the worker. Chrome starts when the first LinkedIn scrape runs, not at worker boot. To attach your own browser instead of spawning one, set WORKER_MANAGE_CHROME=0 and use WORKER_CHROME_PORT.'
+          );
+        }
+        return collectLinkedInPostings({
+          runId: params.runId,
+          linkedinSearchQuery: params.linkedinSearchQuery,
+          driver,
+          env: process.env,
+          streamPosting: params.streamPosting,
+        });
+      } finally {
+        await closeWorkerChromeAfterLinkedInScrape();
       }
-      return collectLinkedInPostings({
-        runId: params.runId,
-        linkedinSearchQuery: params.linkedinSearchQuery,
-        driver,
-        env: process.env,
-        streamPosting: params.streamPosting,
-      });
     });
   }
 
