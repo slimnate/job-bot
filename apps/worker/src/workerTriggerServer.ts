@@ -2,7 +2,7 @@ import http from 'node:http';
 
 import { workerLog } from './log.js';
 import type { WorkerScheduler } from './scheduler.js';
-import { handleRankPostingRequest } from './workerRankPostingHandler.js';
+import { handleRankPostingRequest, handleRankPostingsRequest } from './workerRankPostingHandler.js';
 
 const corsTrigger: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -12,7 +12,8 @@ const corsTrigger: Record<string, string> = {
 
 /**
  * Local-only HTTP trigger: `POST /trigger` runs one scheduler tick; `POST /rank-posting` scores one posting
- * via Cursor CLI (see `workerRankPostingHandler`). Binds `127.0.0.1` only.
+ * and `POST /rank-postings` scores multiple postings in one batch via Cursor CLI.
+ * Binds `127.0.0.1` only.
  */
 export function startWorkerTriggerServer(
   scheduler: WorkerScheduler,
@@ -20,7 +21,10 @@ export function startWorkerTriggerServer(
   options: { convexUrl: string }
 ): http.Server {
   const server = http.createServer((req, res) => {
-    if (req.method === 'OPTIONS' && (req.url === '/trigger' || req.url === '/rank-posting')) {
+    if (
+      req.method === 'OPTIONS' &&
+      (req.url === '/trigger' || req.url === '/rank-posting' || req.url === '/rank-postings')
+    ) {
       res.writeHead(204, corsTrigger);
       res.end();
       return;
@@ -42,6 +46,10 @@ export function startWorkerTriggerServer(
       void handleRankPostingRequest({ convexUrl: options.convexUrl, req, res });
       return;
     }
+    if (req.method === 'POST' && req.url === '/rank-postings') {
+      void handleRankPostingsRequest({ convexUrl: options.convexUrl, req, res });
+      return;
+    }
     res.writeHead(404, corsTrigger);
     res.end();
   });
@@ -49,7 +57,7 @@ export function startWorkerTriggerServer(
   server.listen(port, '127.0.0.1', () => {
     workerLog.info('worker.trigger_http', {
       port,
-      paths: ['/trigger', '/rank-posting'],
+      paths: ['/trigger', '/rank-posting', '/rank-postings'],
       bind: '127.0.0.1',
     });
   });

@@ -142,20 +142,13 @@ function buildPrompt(payload: LlmRequestPayload): string {
   const rankingPrompt = strTrim(c?.rankingPrompt);
   const resumeMarkdown = strTrim(c?.resumeMarkdown);
 
-  const candidateJobs = payload.candidates.map((candidate) => ({
-    postingId: candidate._id,
-    title: candidate.title,
-    company: candidate.company,
-    location: candidate.location ?? null,
-    salaryText: candidate.salaryText ?? null,
-    postedAt: candidate.postedAt ?? null,
-    source: candidate.source,
-    url: candidate.url,
-    descriptionSnippet: candidate.descriptionSnippet ?? null,
-  }));
-
   const sections: string[] = [
-    'You rank job postings for a single user profile.',
+    'Ranking criteria:',
+    profileName.length > 0 ? `- Profile name: ${profileName}` : '- Profile name: (not provided)',
+    rankingPrompt.length > 0 ? `- User ranking instructions: ${rankingPrompt}` : '- User ranking instructions: (not provided)',
+    resumeMarkdown.length > 0 ? `- Resume markdown:\n${resumeMarkdown}` : '- Resume markdown: (not provided)',
+    '',
+    'You rank job postings for this single user profile.',
     'Return JSON only. Do not include markdown.',
     'Output requirements:',
     '- Return one object per input posting, with no omissions and no extras.',
@@ -168,17 +161,25 @@ function buildPrompt(payload: LlmRequestPayload): string {
     '',
   ];
 
-  if (profileName.length > 0) {
-    sections.push(`Profile name: ${profileName}`, '');
+  sections.push('Postings to rank:');
+  for (const [index, candidate] of payload.candidates.entries()) {
+    sections.push(
+      `Posting ${index + 1}:`,
+      JSON.stringify({
+        postingId: candidate._id,
+        title: candidate.title,
+        company: candidate.company,
+        location: candidate.location ?? null,
+        salaryText: candidate.salaryText ?? null,
+        postedAt: candidate.postedAt ?? null,
+        source: candidate.source,
+        url: candidate.url,
+        descriptionSnippet: candidate.descriptionSnippet ?? null,
+      }),
+      ''
+    );
   }
-  if (rankingPrompt.length > 0) {
-    sections.push('User ranking instructions:', rankingPrompt, '');
-  }
-  if (resumeMarkdown.length > 0) {
-    sections.push('Candidate resume (Markdown):', resumeMarkdown, '');
-  }
-
-  sections.push(`CandidateJobs: ${JSON.stringify(candidateJobs)}`);
+  sections.push('Rank each posting and return one JSON list containing all results.');
 
   return sections.join('\n');
 }

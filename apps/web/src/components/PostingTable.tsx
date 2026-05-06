@@ -28,6 +28,22 @@ const formatDateTime = (timestamp?: number): string => {
   return new Date(timestamp).toLocaleString();
 };
 
+const DESCRIPTION_PREVIEW_MAX_CHARS = 140;
+
+/**
+ * Keeps table rows scannable while preserving the full text in a tooltip.
+ */
+const formatDescriptionPreview = (descriptionSnippet?: string): { preview: string; full: string } => {
+  const full = (descriptionSnippet ?? '').trim();
+  if (!full) {
+    return { preview: '-', full: '' };
+  }
+  if (full.length <= DESCRIPTION_PREVIEW_MAX_CHARS) {
+    return { preview: full, full };
+  }
+  return { preview: `${full.slice(0, DESCRIPTION_PREVIEW_MAX_CHARS - 1)}…`, full };
+};
+
 type PostingTableProps = {
   postings: PostingTableRow[] | undefined;
   emptyMessage?: string;
@@ -35,6 +51,9 @@ type PostingTableProps = {
   onDeletePosting?: (posting: PostingTableRow) => Promise<void>;
   /** When set, shows a **Score** action that opens the manual scoring flow (postings page). */
   onOpenScoreDialog?: (posting: PostingTableRow) => void;
+  selectedPostingIds?: Set<string>;
+  onTogglePostingSelection?: (postingId: string, checked: boolean) => void;
+  onToggleSelectAllVisible?: (checked: boolean) => void;
 };
 
 export function PostingTable({
@@ -43,10 +62,18 @@ export function PostingTable({
   deletingPostingId,
   onDeletePosting,
   onOpenScoreDialog,
+  selectedPostingIds,
+  onTogglePostingSelection,
+  onToggleSelectAllVisible,
 }: PostingTableProps) {
   const showActions = Boolean(onDeletePosting || onOpenScoreDialog);
+  const showSelection = Boolean(onTogglePostingSelection);
   const [selectedPostingId, setSelectedPostingId] = useState<string | null>(null);
   const [rawJsonCopyStatus, setRawJsonCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const allVisibleSelected = Boolean(
+    postings?.length &&
+      postings.every((posting) => selectedPostingIds?.has(posting._id))
+  );
   const selectedPosting = useMemo(
     () => postings?.find((posting) => posting._id === selectedPostingId) ?? null,
     [postings, selectedPostingId]
@@ -97,9 +124,20 @@ export function PostingTable({
         <table>
           <thead>
             <tr>
+              {showSelection ? (
+                <th className='select-cell'>
+                  <input
+                    type='checkbox'
+                    aria-label='Select all visible postings'
+                    checked={allVisibleSelected}
+                    onChange={(event) => onToggleSelectAllVisible?.(event.target.checked)}
+                  />
+                </th>
+              ) : null}
               <th>Score</th>
               <th>Role</th>
               <th>Company</th>
+              <th>Description</th>
               <th>Source</th>
               <th>Location</th>
               <th className='timestamp-cell'>Ranked</th>
@@ -109,46 +147,68 @@ export function PostingTable({
           </thead>
           <tbody>
             {postings?.length ? (
-              postings.map((posting) => (
-                <tr key={posting._id}>
-                  <td>{posting.latestRanking?.scoreOverall ?? '-'}</td>
-                  <td>
-                    <a href={posting.url} target='_blank' rel='noreferrer'>
-                      {posting.title}
-                    </a>
-                  </td>
-                  <td>{posting.company}</td>
-                  <td>{posting.source}</td>
-                  <td>{posting.location ?? '-'}</td>
-                  <td className='timestamp-cell'>{formatHumanizedTime(posting.latestRanking?.rankedAt)}</td>
-                  <td className='timestamp-cell'>{formatHumanizedTime(posting.discoveredAt)}</td>
-                  {showActions ? (
-                    <td className='queue-actions-cell'>
-                      <button type='button' onClick={() => setSelectedPostingId(posting._id)}>
-                        View
-                      </button>
-                      {onOpenScoreDialog ? (
-                        <button type='button' onClick={() => onOpenScoreDialog(posting)}>
-                          Score
-                        </button>
-                      ) : null}
-                      {onDeletePosting ? (
-                        <button
-                          type='button'
-                          className='btn-danger'
-                          onClick={() => void onDelete(posting)}
-                          disabled={deletingPostingId === posting._id}
-                        >
-                          {deletingPostingId === posting._id ? 'Deleting…' : 'Delete'}
-                        </button>
-                      ) : null}
+              postings.map((posting) => {
+                const description = formatDescriptionPreview(posting.descriptionSnippet);
+                return (
+                  <tr key={posting._id}>
+                    {showSelection ? (
+                      <td className='select-cell'>
+                        <input
+                          type='checkbox'
+                          aria-label={`Select ${posting.title}`}
+                          checked={Boolean(selectedPostingIds?.has(posting._id))}
+                          onChange={(event) =>
+                            onTogglePostingSelection?.(posting._id, event.target.checked)
+                          }
+                        />
+                      </td>
+                    ) : null}
+                    <td>{posting.latestRanking?.scoreOverall ?? '-'}</td>
+                    <td>
+                      <a href={posting.url} target='_blank' rel='noreferrer'>
+                        {posting.title}
+                      </a>
                     </td>
-                  ) : null}
-                </tr>
-              ))
+                    <td>{posting.company}</td>
+                    <td className='description-snippet-cell' title={description.full || undefined}>
+                      {description.preview}
+                    </td>
+                    <td>{posting.source}</td>
+                    <td>{posting.location ?? '-'}</td>
+                    <td className='timestamp-cell'>{formatHumanizedTime(posting.latestRanking?.rankedAt)}</td>
+                    <td className='timestamp-cell'>{formatHumanizedTime(posting.discoveredAt)}</td>
+                    {showActions ? (
+                      <td className='queue-actions-cell'>
+                        <button type='button' onClick={() => setSelectedPostingId(posting._id)}>
+                          View
+                        </button>
+                        {onOpenScoreDialog ? (
+                          <button
+                            type='button'
+                            className='btn-success'
+                            onClick={() => onOpenScoreDialog(posting)}
+                          >
+                            Score
+                          </button>
+                        ) : null}
+                        {onDeletePosting ? (
+                          <button
+                            type='button'
+                            className='btn-danger'
+                            onClick={() => void onDelete(posting)}
+                            disabled={deletingPostingId === posting._id}
+                          >
+                            {deletingPostingId === posting._id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        ) : null}
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })
             ) : (
               <tr>
-                <td colSpan={showActions ? 8 : 7}>{emptyMessage}</td>
+                <td colSpan={showSelection ? (showActions ? 10 : 9) : showActions ? 9 : 8}>{emptyMessage}</td>
               </tr>
             )}
           </tbody>

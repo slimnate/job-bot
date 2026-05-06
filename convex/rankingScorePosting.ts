@@ -60,20 +60,13 @@ function buildRankingPrompt(criteria: Doc<'job_criteria'> | null, candidates: Ll
   const rankingPrompt = strTrim(c?.rankingPrompt);
   const resumeMarkdown = strTrim(c?.resumeMarkdown);
 
-  const candidateJobs = candidates.map((candidate) => ({
-    postingId: candidate._id,
-    title: candidate.title,
-    company: candidate.company,
-    location: candidate.location ?? null,
-    salaryText: candidate.salaryText ?? null,
-    postedAt: candidate.postedAt ?? null,
-    source: candidate.source,
-    url: candidate.url,
-    descriptionSnippet: candidate.descriptionSnippet ?? null,
-  }));
-
   const sections: string[] = [
-    'You rank job postings for a single user profile.',
+    'Ranking criteria:',
+    profileName.length > 0 ? `- Profile name: ${profileName}` : '- Profile name: (not provided)',
+    rankingPrompt.length > 0 ? `- User ranking instructions: ${rankingPrompt}` : '- User ranking instructions: (not provided)',
+    resumeMarkdown.length > 0 ? `- Resume markdown:\n${resumeMarkdown}` : '- Resume markdown: (not provided)',
+    '',
+    'You rank job postings for this single user profile.',
     'Return JSON only. Do not include markdown.',
     'Output requirements:',
     '- Return one object per input posting, with no omissions and no extras.',
@@ -86,17 +79,25 @@ function buildRankingPrompt(criteria: Doc<'job_criteria'> | null, candidates: Ll
     '',
   ];
 
-  if (profileName.length > 0) {
-    sections.push(`Profile name: ${profileName}`, '');
+  sections.push('Postings to rank:');
+  for (const [index, candidate] of candidates.entries()) {
+    sections.push(
+      `Posting ${index + 1}:`,
+      JSON.stringify({
+        postingId: candidate._id,
+        title: candidate.title,
+        company: candidate.company,
+        location: candidate.location ?? null,
+        salaryText: candidate.salaryText ?? null,
+        postedAt: candidate.postedAt ?? null,
+        source: candidate.source,
+        url: candidate.url,
+        descriptionSnippet: candidate.descriptionSnippet ?? null,
+      }),
+      ''
+    );
   }
-  if (rankingPrompt.length > 0) {
-    sections.push('User ranking instructions:', rankingPrompt, '');
-  }
-  if (resumeMarkdown.length > 0) {
-    sections.push('Candidate resume (Markdown):', resumeMarkdown, '');
-  }
-
-  sections.push(`CandidateJobs: ${JSON.stringify(candidateJobs)}`);
+  sections.push('Rank each posting and return one JSON list containing all results.');
 
   return sections.join('\n');
 }
@@ -214,8 +215,44 @@ export const loadScoreContext = internalQuery({
   },
 });
 
+/**
+ * Loads a criteria profile and a deduped list of postings for batched scoring.
+ * Returns null when criteria is missing or no postings exist after filtering.
+ */
+export const loadBatchScoreContext = internalQuery({
+  args: {
+    postingIds: v.array(v.id('job_postings')),
+    criteriaId: v.id('job_criteria'),
+  },
+  handler: async (ctx, args) => {
+    const criteria = await ctx.db.get(args.criteriaId);
+    if (!criteria) {
+      return null;
+    }
+
+    const dedupedPostingIds = Array.from(new Set(args.postingIds));
+    const postings: Doc<'job_postings'>[] = [];
+    for (const postingId of dedupedPostingIds) {
+      const posting = await ctx.db.get(postingId);
+      if (posting) {
+        postings.push(posting);
+      }
+    }
+
+    if (postings.length === 0) {
+      return null;
+    }
+
+    return { postings, criteria };
+  },
+});
+
 export type ScoreOnePostingResult =
   | { kind: 'success'; scoreOverall: number; model: string }
+  | { kind: 'error'; message: string };
+
+export type ScorePostingsBatchResult =
+  | { kind: 'success'; model: string; saved: number }
   | { kind: 'error'; message: string };
 
 /**
@@ -378,5 +415,165 @@ export const scoreOnePosting = action({
     });
 
     return { kind: 'success', scoreOverall: row.scoreOverall, model: resolvedModel };
+  },
+});
+
+/**
+ * Scores multiple postings in one LLM request and saves one ranking row per posting.
+ * This minimizes token usage by sharing one prompt context (criteria + resume) across all postings.
+ */
+export const scorePostingsBatch = action({
+  args: {
+    postingIds: v.array(v.id('job_postings')),
+    criteriaId: v.id('job_criteria'),
+    /** OpenAI (or compatible) model id, e.g. `gpt-4.1-mini`. */
+    apiModelId: v.string(),
+  },
+  handler: async (ctx, args): Promise<ScorePostingsBatchResult> => {
+    const postingIds = Array.from(new Set(args.postingIds));
+    if (postingIds.length === 0) {
+      return { kind: 'error', message: 'No postings were selected.' };
+    }
+
+    const context = await ctx.runQuery(internal.rankingScorePosting.loadBatchScoreContext, {
+      postingIds,
+      criteriaId: args.criteriaId,
+    });
+    if (!context) {
+      return { kind: 'error', message: 'Criteria profile or selected postings were not found.' };
+    }
+
+    const apiKey = readEnv('OPENAI_API_KEY')?.trim();
+    if (!apiKey) {
+      return {
+        kind: 'error',
+        message:
+          'OPENAI_API_KEY is not set for Convex. Add it in the Convex dashboard (Settings → Environment Variables) to score from the web app.',
+      };
+    }
+
+    const baseUrl = (readEnv('LLM_API_BASE_URL') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+    const temperatureRaw = Number(readEnv('LLM_RANKING_TEMPERATURE') ?? '0.1');
+    const temperature = Number.isFinite(temperatureRaw) ? temperatureRaw : 0.1;
+    const resolvedModel = (args.apiModelId.trim() || readEnv('LLM_RANKING_MODEL') || 'gpt-4.1-mini').trim();
+
+    const candidates: LlmCandidate[] = context.postings.map((posting) => ({
+      _id: posting._id,
+      title: posting.title,
+      company: posting.company,
+      location: posting.location,
+      salaryText: posting.salaryText,
+      descriptionSnippet: posting.descriptionSnippet,
+      postedAt: posting.postedAt,
+      url: posting.url,
+      source: posting.source,
+    }));
+
+    const userContent = buildRankingPrompt(context.criteria, candidates);
+    let normalized: RankingResult[] | null = null;
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: resolvedModel,
+          temperature,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a strict ranking engine that only returns valid JSON matching the provided schema.',
+            },
+            {
+              role: 'user',
+              content: userContent,
+            },
+          ],
+          response_format: {
+            type: 'json_schema',
+            json_schema: rankingJsonSchema,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        return {
+          kind: 'error',
+          message: `LLM request failed (${response.status}): ${errorBody.slice(0, 500)}`,
+        };
+      }
+
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string | null } }>;
+      };
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) {
+        if (attempt < 2) {
+          await sleep(600);
+          continue;
+        }
+        return { kind: 'error', message: 'LLM returned an empty response.' };
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(content) as unknown;
+      } catch {
+        if (attempt < 2) {
+          await sleep(600);
+          continue;
+        }
+        return { kind: 'error', message: 'LLM response was not valid JSON.' };
+      }
+
+      const rankings = validateRankingResults(parsed);
+      if (!rankings) {
+        if (attempt < 2) {
+          await sleep(600);
+          continue;
+        }
+        return { kind: 'error', message: 'LLM output did not match the expected ranking schema.' };
+      }
+
+      const checked = ensureAllCandidatesRanked(candidates, rankings);
+      if (!checked) {
+        if (attempt < 2) {
+          await sleep(600);
+          continue;
+        }
+        return {
+          kind: 'error',
+          message:
+            'LLM output did not include exactly one result for each selected posting, or postingId mismatched.',
+        };
+      }
+
+      normalized = checked;
+      break;
+    }
+
+    if (!normalized || normalized.length !== candidates.length) {
+      return { kind: 'error', message: 'Batch ranking failed after retries.' };
+    }
+
+    await ctx.runMutation(api.ranking.upsertResults, {
+      criteriaId: args.criteriaId,
+      model: resolvedModel,
+      rankings: normalized.map((row) => ({
+        postingId: row.postingId as Doc<'job_postings'>['_id'],
+        rank: row.rank,
+        scoreOverall: row.scoreOverall,
+        reasoningSummary: row.reasoningSummary,
+        criteriaMatch: row.criteriaMatch,
+        redFlags: row.redFlags,
+      })),
+    });
+
+    return { kind: 'success', model: resolvedModel, saved: normalized.length };
   },
 });

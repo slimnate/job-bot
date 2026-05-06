@@ -29,6 +29,7 @@ export function PostingViewer() {
   const deletePosting = useMutation(api.postings.deleteOne);
   const clearAllPostings = useMutation(api.postings.clearAll);
   const scoreOnePosting = useAction(api.rankingScorePosting.scoreOnePosting);
+  const scorePostingsBatch = useAction(api.rankingScorePosting.scorePostingsBatch);
   const [postingQuery, setPostingQuery] = useState('');
   const [postingSource, setPostingSource] = useState('');
   const [postingSort, setPostingSort] = useState<PostingSort>('scoreDesc');
@@ -36,7 +37,8 @@ export function PostingViewer() {
   const [postingMessage, setPostingMessage] = useState('');
   const [deletingPostingId, setDeletingPostingId] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
-  const [scoreTarget, setScoreTarget] = useState<PostingTableRow | null>(null);
+  const [selectedPostingIds, setSelectedPostingIds] = useState<Set<string>>(new Set());
+  const [scoreTargets, setScoreTargets] = useState<PostingTableRow[]>([]);
   const [scoreCriteriaId, setScoreCriteriaId] = useState<Id<'job_criteria'> | ''>('');
   const [scoreProviderKey, setScoreProviderKey] = useState('');
   const [scoreApiModelId, setScoreApiModelId] = useState('');
@@ -64,7 +66,7 @@ export function PostingViewer() {
   );
 
   useEffect(() => {
-    if (!scoreTarget || !criteriaProfiles?.length) {
+    if (!scoreTargets.length || !criteriaProfiles?.length) {
       return;
     }
     setScoreCriteriaId((prev) => {
@@ -74,10 +76,10 @@ export function PostingViewer() {
       const active = criteriaProfiles.find((c) => c.isActive);
       return (active ?? criteriaProfiles[0])!._id;
     });
-  }, [scoreTarget, criteriaProfiles]);
+  }, [scoreTargets, criteriaProfiles]);
 
   useEffect(() => {
-    if (!scoreTarget || !llmCatalog?.length) {
+    if (!scoreTargets.length || !llmCatalog?.length) {
       return;
     }
     setScoreProviderKey((prev) => {
@@ -86,10 +88,10 @@ export function PostingViewer() {
       }
       return llmCatalog[0]!.key;
     });
-  }, [scoreTarget, llmCatalog]);
+  }, [scoreTargets, llmCatalog]);
 
   useEffect(() => {
-    if (!scoreTarget || !selectedProvider?.models.length) {
+    if (!scoreTargets.length || !selectedProvider?.models.length) {
       return;
     }
     setScoreApiModelId((prev) => {
@@ -98,23 +100,34 @@ export function PostingViewer() {
       }
       return selectedProvider.models[0]!.apiModelId;
     });
-  }, [scoreTarget, selectedProvider]);
+  }, [scoreTargets, selectedProvider]);
+
+  useEffect(() => {
+    if (!postings) {
+      return;
+    }
+    const visiblePostingIds = new Set(postings.map((posting) => posting._id as string));
+    setSelectedPostingIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => visiblePostingIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [postings]);
 
   const openScoreDialog = (posting: PostingTableRow) => {
     setScoreDialogError('');
-    setScoreTarget(posting);
+    setScoreTargets([posting]);
   };
 
   const closeScoreDialog = () => {
     if (scoreBusy) {
       return;
     }
-    setScoreTarget(null);
+    setScoreTargets([]);
     setScoreDialogError('');
   };
 
   const onSubmitScore = async () => {
-    if (!scoreTarget || !scoreCriteriaId) {
+    if (!scoreTargets.length || !scoreCriteriaId) {
       setScoreDialogError('Pick a criteria profile.');
       return;
     }
@@ -127,41 +140,67 @@ export function PostingViewer() {
     setScoreDialogError('');
     try {
       if (selectedProvider.surface === 'convex_http') {
-        const result = await scoreOnePosting({
-          postingId: scoreTarget._id,
-          criteriaId: scoreCriteriaId,
-          apiModelId: scoreApiModelId,
-        });
-        if (result.kind === 'success') {
-          setPostingMessage(
-            `Scored '${scoreTarget.title}' — overall ${result.scoreOverall} (model: ${result.model}).`
-          );
-          setScoreTarget(null);
+        if (scoreTargets.length === 1) {
+          const one = await scoreOnePosting({
+            postingId: scoreTargets[0]!._id,
+            criteriaId: scoreCriteriaId,
+            apiModelId: scoreApiModelId,
+          });
+          if (one.kind === 'error') {
+            setScoreDialogError(one.message);
+            return;
+          }
+          setPostingMessage(`Scored '${scoreTargets[0]!.title}'.`);
         } else {
-          setScoreDialogError(result.message);
+          const batch = await scorePostingsBatch({
+            postingIds: scoreTargets.map((posting) => posting._id),
+            criteriaId: scoreCriteriaId,
+            apiModelId: scoreApiModelId,
+          });
+          if (batch.kind === 'error') {
+            setScoreDialogError(batch.message);
+            return;
+          }
+          setPostingMessage(`Scored ${batch.saved} posting(s) in one batch request.`);
         }
-        return;
+      } else {
+        const base = workerTriggerBaseUrl();
+        if (scoreTargets.length === 1) {
+          const res = await fetch(`${base}/rank-posting`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              postingId: scoreTargets[0]!._id,
+              criteriaId: scoreCriteriaId,
+              model: scoreApiModelId,
+            }),
+          });
+          const json = (await res.json()) as { ok?: boolean; error?: string };
+          if (!res.ok || !json.ok) {
+            setScoreDialogError(json.error ?? `Worker request failed (${res.status}).`);
+            return;
+          }
+          setPostingMessage(`Scored '${scoreTargets[0]!.title}'.`);
+        } else {
+          const res = await fetch(`${base}/rank-postings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              postingIds: scoreTargets.map((posting) => posting._id),
+              criteriaId: scoreCriteriaId,
+              model: scoreApiModelId,
+            }),
+          });
+          const json = (await res.json()) as { ok?: boolean; error?: string; saved?: number };
+          if (!res.ok || !json.ok) {
+            setScoreDialogError(json.error ?? `Worker batch request failed (${res.status}).`);
+            return;
+          }
+          setPostingMessage(`Scored ${json.saved ?? scoreTargets.length} posting(s) in one batch request.`);
+        }
       }
-
-      const base = workerTriggerBaseUrl();
-      const res = await fetch(`${base}/rank-posting`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          postingId: scoreTarget._id,
-          criteriaId: scoreCriteriaId,
-          model: scoreApiModelId,
-        }),
-      });
-      const json = (await res.json()) as { ok?: boolean; error?: string; scoreOverall?: number; model?: string };
-      if (!res.ok || !json.ok) {
-        setScoreDialogError(json.error ?? `Worker request failed (${res.status}).`);
-        return;
-      }
-      setPostingMessage(
-        `Scored '${scoreTarget.title}' — overall ${json.scoreOverall ?? '-'} (model: ${json.model ?? scoreApiModelId}).`
-      );
-      setScoreTarget(null);
+      setScoreTargets([]);
+      setSelectedPostingIds(new Set());
     } catch (error) {
       setScoreDialogError(
         error instanceof Error ? error.message : 'Scoring failed. Is the worker running with HTTP trigger port?'
@@ -184,6 +223,67 @@ export function PostingViewer() {
     } finally {
       setDeletingPostingId(null);
     }
+  };
+
+  /**
+   * Maintains multi-select state from the first-column row checkboxes.
+   */
+  const onTogglePostingSelection = (postingId: string, checked: boolean) => {
+    setSelectedPostingIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(postingId);
+      } else {
+        next.delete(postingId);
+      }
+      return next;
+    });
+  };
+
+  /**
+   * Toggles all currently visible rows, matching table filter/sort state.
+   */
+  const onToggleSelectAllVisible = (checked: boolean) => {
+    if (!postings?.length) {
+      return;
+    }
+    if (checked) {
+      setSelectedPostingIds(new Set(postings.map((posting) => posting._id)));
+      return;
+    }
+    setSelectedPostingIds(new Set());
+  };
+
+  const onBulkDeleteSelected = async () => {
+    if (!postings?.length || !selectedPostingIds.size) {
+      return;
+    }
+    const selected = postings.filter((posting) => selectedPostingIds.has(posting._id));
+    const confirmed = window.confirm(`Delete ${selected.length} selected posting(s)? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+    setPostingMessage('');
+    let deleted = 0;
+    for (const posting of selected) {
+      try {
+        await deletePosting({ postingId: posting._id });
+        deleted += 1;
+      } catch {
+        // Continue deleting remaining selections and summarize completion count.
+      }
+    }
+    setSelectedPostingIds(new Set());
+    setPostingMessage(`Deleted ${deleted}/${selected.length} selected posting(s).`);
+  };
+
+  const onBulkScoreSelected = () => {
+    if (!postings?.length || !selectedPostingIds.size) {
+      return;
+    }
+    const selected = postings.filter((posting) => selectedPostingIds.has(posting._id));
+    setScoreDialogError('');
+    setScoreTargets(selected);
   };
 
   const onClearAll = async () => {
@@ -215,6 +315,7 @@ export function PostingViewer() {
     Boolean(selectedProvider?.models.length) &&
     Boolean(scoreApiModelId) &&
     !catalogEmpty;
+  const selectedCount = selectedPostingIds.size;
 
   const scoreHint =
     selectedProvider?.surface === 'worker_cursor' ? (
@@ -276,27 +377,54 @@ export function PostingViewer() {
           <option value='postedAtDesc'>Posted (newest)</option>
         </select>
       </div>
+      <div className='actions posting-bulk-actions'>
+        <button
+          type='button'
+          className='btn-success'
+          onClick={onBulkScoreSelected}
+          disabled={!selectedCount || scoreBusy || isClearing}
+        >
+          Score selected ({selectedCount})
+        </button>
+        <button
+          type='button'
+          className='btn-danger'
+          onClick={() => void onBulkDeleteSelected()}
+          disabled={!selectedCount || scoreBusy || isClearing || deletingPostingId !== null}
+        >
+          Delete selected ({selectedCount})
+        </button>
+      </div>
       <PostingTable
         postings={postings}
         deletingPostingId={deletingPostingId}
         onDeletePosting={onDeletePosting}
         onOpenScoreDialog={openScoreDialog}
+        selectedPostingIds={selectedPostingIds}
+        onTogglePostingSelection={onTogglePostingSelection}
+        onToggleSelectAllVisible={onToggleSelectAllVisible}
         emptyMessage={postings === undefined ? 'Loading…' : 'No postings match these filters.'}
       />
-      {scoreTarget ? (
+      {scoreTargets.length ? (
         <div className='modal-overlay' onClick={closeScoreDialog} role='presentation'>
           <div className='modal-card' onClick={(event) => event.stopPropagation()} role='dialog' aria-modal='true'>
             <div className='modal-header'>
-              <h3>Score posting</h3>
+              <h3>{scoreTargets.length === 1 ? 'Score posting' : `Score ${scoreTargets.length} postings`}</h3>
               <button type='button' onClick={closeScoreDialog} disabled={scoreBusy}>
                 Close
               </button>
             </div>
             <div className='modal-body'>
               <p className='panel-subtitle tight'>
-                <strong>{scoreTarget.title}</strong>
-                {' · '}
-                {scoreTarget.company}
+                {scoreTargets.length === 1 ? (
+                  <>
+                    <strong>{scoreTargets[0]!.title}</strong>
+                    {' · '}
+                    {scoreTargets[0]!.company}
+                  </>
+                ) : (
+                  <strong>Selected postings will be scored one by one with the same criteria/provider/model.</strong>
+                )}
               </p>
               <label className='stacked-field' htmlFor='score-criteria-select'>
                 Criteria profile

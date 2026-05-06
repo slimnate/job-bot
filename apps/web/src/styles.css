@@ -283,10 +283,26 @@ button.btn-primary:hover:not(:disabled) {
   border-color: #2563eb;
 }
 
+/** Positive actions (score/re-score). */
+button.btn-success {
+  background: #15803d;
+  border-color: #166534;
+  color: #f0fdf4;
+}
+
+button.btn-success:hover:not(:disabled) {
+  background: #16a34a;
+  border-color: #15803d;
+}
+
 .actions {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.posting-bulk-actions {
+  margin-bottom: 0.75rem;
 }
 
 .status-text {
@@ -397,6 +413,19 @@ thead th {
 
 .timestamp-cell {
   white-space: nowrap;
+}
+
+.select-cell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.description-snippet-cell {
+  max-width: 32rem;
+  min-width: 16rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .queue-actions-cell button {

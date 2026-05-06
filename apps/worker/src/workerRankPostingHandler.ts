@@ -36,6 +36,7 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 
 type RankPostingBody = {
   postingId?: string;
+  postingIds?: string[];
   criteriaId?: string;
   model?: string;
 };
@@ -170,6 +171,140 @@ export async function handleRankPostingRequest(params: {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     workerLog.error('rank_posting.failed', { err: message });
+    res.writeHead(500, { ...corsJson, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: message }));
+  }
+}
+
+/**
+ * Handles `POST /rank-postings`: loads selected postings + criteria, runs one Cursor CLI ranking call
+ * for the full batch, writes one ranking row per posting.
+ */
+export async function handleRankPostingsRequest(params: {
+  convexUrl: string;
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+}): Promise<void> {
+  const { convexUrl, req, res } = params;
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, corsJson);
+    res.end();
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.writeHead(405, { ...corsJson, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'Method not allowed' }));
+    return;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await readJsonBody(req);
+  } catch {
+    res.writeHead(400, { ...corsJson, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'Invalid JSON body' }));
+    return;
+  }
+
+  const body = (parsed ?? {}) as RankPostingBody;
+  const postingIdsRaw = Array.isArray(body.postingIds) ? body.postingIds : [];
+  const postingIds = Array.from(
+    new Set(postingIdsRaw.filter((value): value is string => typeof value === 'string' && value.length > 0))
+  );
+  const criteriaId = body.criteriaId;
+  const model = typeof body.model === 'string' ? body.model.trim() : '';
+
+  if (!postingIds.length || !criteriaId || !model) {
+    res.writeHead(400, { ...corsJson, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'Missing postingIds, criteriaId, or model' }));
+    return;
+  }
+
+  const convex = new ConvexHttpClient(convexUrl);
+
+  async function runConvex<T>(label: string, operation: () => Promise<T>): Promise<T> {
+    return withRetry(operation, {
+      ...convexRetryOptions,
+      label,
+    });
+  }
+
+  try {
+    const criteria = await runConvex('criteria.getById', () =>
+      convex.query(api.criteria.getById, { id: criteriaId as Id<'job_criteria'> })
+    );
+    if (!criteria) {
+      res.writeHead(404, { ...corsJson, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Criteria profile not found' }));
+      return;
+    }
+
+    const postingDocs = await Promise.all(
+      postingIds.map((postingId) =>
+        runConvex('postings.getById', () =>
+          convex.query(api.postings.getById, { postingId: postingId as Id<'job_postings'> })
+        )
+      )
+    );
+    const candidates: LlmRankingCandidate[] = postingDocs
+      .filter((posting): posting is NonNullable<typeof posting> => posting !== null)
+      .map((posting) => ({
+        _id: posting._id,
+        title: posting.title,
+        company: posting.company,
+        location: posting.location,
+        salaryText: posting.salaryText,
+        descriptionSnippet: posting.descriptionSnippet,
+        postedAt: posting.postedAt,
+        url: posting.url,
+        source: posting.source,
+      }));
+    if (!candidates.length) {
+      res.writeHead(404, { ...corsJson, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'No selected postings were found' }));
+      return;
+    }
+
+    workerLog.info('rank_postings.start', {
+      postingCount: candidates.length,
+      criteriaId,
+      model,
+    });
+
+    const rankingResult = await rankJobsWithCursor({
+      criteria: criteria as Doc<'job_criteria'>,
+      model,
+      candidates,
+    });
+
+    const rankings = rankingResult.rankings;
+    if (rankings.length !== candidates.length) {
+      res.writeHead(500, { ...corsJson, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Ranker returned incomplete results' }));
+      return;
+    }
+
+    await runConvex('ranking.upsertResults', () =>
+      convex.mutation(api.ranking.upsertResults, {
+        criteriaId: criteriaId as Id<'job_criteria'>,
+        model: rankingResult.model,
+        rankings,
+      })
+    );
+
+    res.writeHead(200, { ...corsJson, 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        saved: rankings.length,
+        model: rankingResult.model,
+      })
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    workerLog.error('rank_postings.failed', { err: message });
     res.writeHead(500, { ...corsJson, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: message }));
   }
