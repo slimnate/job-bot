@@ -52,6 +52,8 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 - `packages/shared`: shared types/schemas
 - `packages/agent-core`: agent-core package (currently stub)
 
+Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
+
 ## Data model (Convex)
 
 - `job_criteria`: named profile (`name`, `isActive`, optional `notes`, `resumeMarkdown`, `rankingPrompt`)
