@@ -5,20 +5,21 @@ import type { LinkedInDebugSteps } from './linkedinDebugSteps.js';
  * Ported from oc-job-capture/popup.js executeLinkExtraction patterns + read-more expansion.
  *
  * @param maxPages How many results pages to walk (clamped by the caller, typically from `WORKER_LINKEDIN_PAGES`).
- * @param maxCollectedJobs Stop listing once this many job records are collected (temporary dev cap from worker).
+ * @param maxCollectedJobs Optional cap for collected postings; when undefined, collection is unbounded.
  */
 export function buildLinkedInJobsListScrapeExpression(
   debugMode: LinkedInDebugSteps,
   maxPages: number,
-  maxCollectedJobs: number
+  maxCollectedJobs: number | undefined
 ): string {
   const DEBUG = JSON.stringify(debugMode);
   const pages = Math.max(1, Math.floor(maxPages));
-  const jobsCap = Math.max(1, Math.floor(maxCollectedJobs));
+  const maxCollectedJobsLiteral =
+    maxCollectedJobs === undefined ? 'null' : String(Math.max(1, Math.floor(maxCollectedJobs)));
   return `(async () => {
     const DEBUG = ${DEBUG};
     const MAX_PAGES = ${pages};
-    const MAX_COLLECTED_JOBS = ${jobsCap};
+    const MAX_COLLECTED_JOBS = ${maxCollectedJobsLiteral};
     const na = 'N/A';
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -515,8 +516,7 @@ export function buildLinkedInJobsListScrapeExpression(
               if (st) return st;
             }
             console.log('collected', collected.length);
-            console.log('MAX_COLLECTED_JOBS', MAX_COLLECTED_JOBS);
-            if (collected.length >= MAX_COLLECTED_JOBS) {
+            if (MAX_COLLECTED_JOBS !== null && collected.length >= MAX_COLLECTED_JOBS) {
               return { jobs: collected, aborted: aborted(), finishEarly: false };
             }
           }

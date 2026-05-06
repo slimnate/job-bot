@@ -36,14 +36,11 @@ function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean
   return defaultValue;
 }
 
-const DEFAULT_LINKEDIN_PAGES = 1;
+const DEFAULT_LINKEDIN_PAGES = 3;
 const MAX_LINKEDIN_PAGES_CAP = 10;
 
-/** Temporary: stop LinkedIn listing after this many job records are collected, then run upsert/rank as usual. */
-const TEMP_LINKEDIN_MAX_COLLECTED_POSTINGS = 3;
-
 /**
- * Parses `WORKER_LINKEDIN_PAGES`: positive integer, default 1, capped for safety.
+ * Parses `WORKER_LINKEDIN_PAGES`: positive integer, default 3, capped for safety.
  */
 function parseLinkedInPagesFromEnv(env: NodeJS.ProcessEnv): number {
   const raw = env.WORKER_LINKEDIN_PAGES;
@@ -62,6 +59,25 @@ function parseLinkedInPagesFromEnv(env: NodeJS.ProcessEnv): number {
       message: `WORKER_LINKEDIN_PAGES=${n} exceeds cap ${MAX_LINKEDIN_PAGES_CAP}; using cap`,
     });
     return MAX_LINKEDIN_PAGES_CAP;
+  }
+  return n;
+}
+
+/**
+ * Parses `WORKER_LINKEDIN_MAX_POSTINGS`: optional positive integer cap for collected postings.
+ * Returns `undefined` when unset/blank so scraping remains uncapped.
+ */
+function parseLinkedInMaxPostingsFromEnv(env: NodeJS.ProcessEnv): number | undefined {
+  const raw = env.WORKER_LINKEDIN_MAX_POSTINGS;
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const n = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n) || n < 1) {
+    workerLog.warn('linkedin.max_postings', {
+      message: `Invalid WORKER_LINKEDIN_MAX_POSTINGS=${JSON.stringify(raw)}; ignoring cap`,
+    });
+    return undefined;
   }
   return n;
 }
@@ -376,6 +392,7 @@ export async function collectLinkedInPostings(params: {
 }): Promise<ScrapeResult> {
   const debugMode: LinkedInDebugSteps = parseLinkedInDebugSteps(params.env);
   const linkedInMaxPages = parseLinkedInPagesFromEnv(params.env);
+  const linkedInMaxPostings = parseLinkedInMaxPostingsFromEnv(params.env);
   const headless = parseEnvBool(params.env.WORKER_CHROME_HEADLESS, true);
   if (headless) {
     workerLog.warn('linkedin.chrome', {
@@ -425,7 +442,10 @@ export async function collectLinkedInPostings(params: {
             if (streamedExternalIds.has(id)) {
               return;
             }
-            if (streamedExternalIds.size >= TEMP_LINKEDIN_MAX_COLLECTED_POSTINGS) {
+            if (
+              linkedInMaxPostings !== undefined &&
+              streamedExternalIds.size >= linkedInMaxPostings
+            ) {
               return;
             }
             streamedExternalIds.add(id);
@@ -497,13 +517,14 @@ export async function collectLinkedInPostings(params: {
     await injectOverlayIfNeeded();
     workerLog.info('linkedin.scrape', {
       maxPages: linkedInMaxPages,
-      maxCollectedJobsTemp: TEMP_LINKEDIN_MAX_COLLECTED_POSTINGS,
+      maxPostings: linkedInMaxPostings ?? null,
       WORKER_LINKEDIN_PAGES: params.env.WORKER_LINKEDIN_PAGES ?? null,
+      WORKER_LINKEDIN_MAX_POSTINGS: params.env.WORKER_LINKEDIN_MAX_POSTINGS ?? null,
     });
     const expr = buildLinkedInJobsListScrapeExpression(
       debugMode,
       linkedInMaxPages,
-      TEMP_LINKEDIN_MAX_COLLECTED_POSTINGS
+      linkedInMaxPostings
     );
     const outcome = (await params.driver.evaluate<BundleOutcome>(expr)) as BundleOutcome;
 
@@ -554,7 +575,10 @@ export async function collectLinkedInPostings(params: {
     }
 
     const uniqueJobs = Array.from(seen.values());
-    const cappedJobs = uniqueJobs.slice(0, TEMP_LINKEDIN_MAX_COLLECTED_POSTINGS);
+    const cappedJobs =
+      linkedInMaxPostings !== undefined
+        ? uniqueJobs.slice(0, linkedInMaxPostings)
+        : uniqueJobs;
     const postings = cappedJobs.map((job) => ({
       source: 'linkedin',
       externalId: job.externalId,
