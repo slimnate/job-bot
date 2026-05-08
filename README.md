@@ -37,9 +37,9 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 2. Runs are queued either:
    - manually from the dashboard (`runs.trigger`), optionally with an explicit `source` and `criteriaId`.
 3. Worker dequeues runs with bounded concurrency.
-4. Worker collects postings for a source (**LinkedIn implemented**; unsupported sources fail fast to avoid placeholder data pollution). LinkedIn scrape cleanup tears down Chrome after each run.
+4. Worker collects postings for a source (**LinkedIn implemented**; unsupported sources fail fast to avoid placeholder data pollution). LinkedIn scrape cleanup tears down Chrome after each run by default (`WORKER_AUTO_CLEANUP_CHROME=1`).
 5. Worker upserts postings in Convex (`postings.upsertBatch`).
-6. Worker computes LLM ranking using the **run’s** `criteriaId` when set (otherwise the active profile) and persists results (`ranking.upsertResults`).
+6. Worker computes LLM ranking using the **run’s** `criteriaId` when set (otherwise the active profile) and persists results (`ranking.upsertResults`) unless disabled with `WORKER_ENABLE_LLM_RANKING=0` during testing.
 7. Worker marks run status and stats (`runs.updateStatus`).
 8. While a run executes, the worker mirrors JSON log lines to Convex (`runLogs.appendBatch`) for inspection in the dashboard.
 9. Web app updates from Convex queries.
@@ -127,10 +127,21 @@ Worker-specific optional env vars:
 - `CHROME_PATH` (optional; path to Chrome/Chromium)
 - `WORKER_CHROME_PORT` (default: `9222`)
 - `WORKER_MANAGE_CHROME` (default: `true`; set `0` to attach to an already running Chrome with remote debugging on `WORKER_CHROME_PORT`)
+- `WORKER_AUTO_CLEANUP_CHROME` (default: `true`; set `0` during debugging to keep the Chrome worker instance alive across LinkedIn runs instead of auto-closing/detaching after each run)
 - `WORKER_HTTP_TRIGGER_PORT` (optional): when set (e.g. `3999`), the worker listens on `127.0.0.1` for `POST /trigger` and `POST /rank-posting` (manual Cursor CLI score from the Postings page). Root `npm run dev:all` sets `3999` on the worker leg.
 - `WORKER_LINKEDIN_PAGES` (default: `3`): how many LinkedIn results **pages** (pagination “Next”) the in-browser scraper will attempt per run, minimum `1`, maximum `10`. Invalid values fall back to the default; values above the cap are clamped with a worker warning.
 - `WORKER_LINKEDIN_MAX_POSTINGS` (optional, default: unlimited): positive integer cap for total LinkedIn postings collected in a run. When set, the browser-side scraper stops after hitting the cap, live stream upserts also stop at the same threshold, and final postings output is capped for consistency. Invalid values are ignored with a worker warning.
+
+**LinkedIn field extraction (anti bleed):** The CDP scraper resolves the **active** job from the URL (`currentJobId` or `/jobs/view/<id>`) and scopes fields to that job’s **list card** and the **job detail** column.
+
+- **Salary** — taken only from (1) the expanded “About the job” / legal pay text in the detail pane, then (2) a short salary chip **inside that job’s list card**. It does **not** walk every `span`/`p`/`div` on the page (which previously reused one sidebar salary for unrelated postings).
+- **Title, company, location** — prefer the selected card + detail pane; there is no `document.body` regex fallback for location.
+- **Integrity** — a capture is skipped if the posting id disagrees with the URL’s current job id, or if neither a list card nor a detail root can be resolved.
+
+Stored postings include `rawPayload.extractionDiagnostics` (`salarySource`, `hasListCard`, `hasDetailRoot`, `detailLikelyForJob`, `currentJobIdFromUrl`) for debugging. Regression coverage: `npm run test:worker` (requires dependencies installed; the worker lists `jsdom` as a dev dependency).
+
 - `WORKER_LINKEDIN_DEBUG_STEPS` (default: off / `none` if unset): `none` | `coarse` | `fine` — after the browser reaches the jobs shell, a **fixed strip along the top** of the viewport is injected. **`none`**: a slim bar with **Finish & rank** (same behavior as the full bar — stop listing and continue the run into ranking with jobs collected so far) and **Abort** (cancel without ranking); no stepped **Continue** phases. **`coarse`** / **`fine`**: full bar with **Finish & rank**, **Continue**, and **Abort** — **Continue** advances stepped phases. While scraping (including `fine` steps), each job is upserted into Convex as soon as it is captured so the web UI updates live (final batch upsert still runs for consistency). `coarse` pauses at major phases and before pagination; `fine` also pauses after each job with title + 100-character description preview. Set this in `.env.local` (for example `fine` while iterating). **Important:** Node’s `--env-file` does **not** override variables already set in the process environment, so a shell export of `WORKER_LINKEDIN_DEBUG_STEPS=…` would ignore your `.env.local` value for that key until you unset it or remove the export.
+- `WORKER_ENABLE_LLM_RANKING` (default: `true`; set `0` during testing to skip post-scrape LLM ranking and complete runs with `rankedCount=0`)
 - `WORKER_QUEUE_CONCURRENCY` (default: `2`): multiple sources can run in parallel, but **LinkedIn scrapes are serialized** in the worker (one shared Chrome tab/CDP session) so two LinkedIn jobs never navigate at once.
 - `WORKER_CRON_INTERVAL_MINUTES` (default: `15`)
 - `WORKER_RUN_ON_START` (default: `true`): controls whether the scheduler immediately checks for already queued runs on worker boot; it does **not** auto-create new scrape runs.
@@ -185,7 +196,7 @@ From repo root:
 - `npm run clean`
 - `npm run dev:all` — runs Convex, web, and worker together. The worker leg sets `WORKER_HTTP_TRIGGER_PORT=3999`, `WORKER_USE_CHROME=1`, and `WORKER_CHROME_HEADLESS=0` so LinkedIn CDP and the HTTP trigger work without extra shell env; Chrome still **starts only when the first LinkedIn scrape runs**, not at worker boot. Add `WORKER_LINKEDIN_DEBUG_STEPS=fine` (or `coarse` / `none`) to `.env.local` if you want the in-page debug bar; leave unset for `none`. If you add new npm dependencies, run `npm install` at the repo root.
 - `npm run populate:ranking-catalog` — fetches OpenAI `/v1/models` (chat-oriented filter) and merges a static Cursor CLI model list into Convex (`rankingLlmCatalog.replaceCatalog`). Requires `CONVEX_URL` and `OPENAI_API_KEY` for live OpenAI rows.
-- `npm run trigger:linkedin` — if nothing responds on the worker HTTP trigger port, builds (unless `--skip-worker-build`) and **imports the worker in the same Node process** (`startWorker()`), so worker logs and errors print in your terminal. Queues a LinkedIn scrape, runs **`scheduler.runNow()`** (no HTTP hop when embedded), waits until Convex reports a terminal run status (override timeout with `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS`). If a worker is already listening on the trigger port, only queues + **POST /trigger** is used. Loads `.env.local` via Node’s `--env-file`. Keyword search: `npm run trigger:linkedin -- --query "your terms"`. Flags: `--no-start-worker`, `--skip-worker-build`, `--no-wait` (exit before polling run completion).
+- `npm run trigger:linkedin` — if nothing responds on the worker HTTP trigger port, builds (unless `--skip-worker-build`) and **imports the worker in the same Node process** (`startWorker()`), so worker logs and errors print in your terminal. Queues a LinkedIn scrape, runs **`scheduler.runNow()`** (no HTTP hop when embedded), waits until Convex reports a terminal run status (override timeout with `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS`). If a worker is already listening on the trigger port, only queues + **POST /trigger** is used. Loads `.env.local` via Node’s `--env-file`. Search examples: `npm run trigger:linkedin -- --query "your terms"` and `npm run trigger:linkedin -- --query "your terms" --location "Austin, TX"` (you can pass location without query too). Flags: `--no-start-worker`, `--skip-worker-build`, `--no-wait` (exit before polling run completion).
 
 Per workspace:
 

@@ -32,6 +32,8 @@ export default defineSchema({
     source: v.string(),
     /** LinkedIn: empty/omitted = jobs hub "Jobs based on your preferences" path; non-empty = keyword search. */
     linkedinSearchQuery: v.optional(v.string()),
+    /** LinkedIn search location filter (city/region text accepted by LinkedIn). */
+    linkedinLocation: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),
       v.literal('running'),

@@ -1,4 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import type { LinkedInDebugSteps } from './linkedinDebugSteps.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Browser-side helper bundle (injected before the async scrape driver).
+ * Kept as a `.js` file so the same source runs in Node tests (jsdom) and in CDP `evaluate`.
+ */
+function loadLinkedInScrapeInpageSource(): string {
+  return readFileSync(join(__dirname, 'linkedinScrapeInpage.js'), 'utf8');
+}
 
 /**
  * Browser-side async scrape for LinkedIn jobs search results (split-pane list/detail).
@@ -16,32 +30,23 @@ export function buildLinkedInJobsListScrapeExpression(
   const pages = Math.max(1, Math.floor(maxPages));
   const maxCollectedJobsLiteral =
     maxCollectedJobs === undefined ? 'null' : String(Math.max(1, Math.floor(maxCollectedJobs)));
+  const INPAGE = loadLinkedInScrapeInpageSource();
   return `(async () => {
+    ${INPAGE}
+    const li = globalThis.__jobBotLiScrape;
     const DEBUG = ${DEBUG};
     const MAX_PAGES = ${pages};
     const MAX_COLLECTED_JOBS = ${maxCollectedJobsLiteral};
-    const na = 'N/A';
+    const na = li.na;
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-    const normalizeInline = (value) => {
-      if (!value) return '';
-      return String(value).replace(/\\s+/g, ' ').trim();
-    };
-
-    const normalizeMultiline = (value) => {
-      if (!value) return '';
-      return String(value)
-        .replace(/\\r/g, '')
-        .split('\\n')
-        .map((line) => normalizeInline(line))
-        .filter(Boolean)
-        .join('\\n');
-    };
 
     const aborted = () => Boolean(window.__jobBotScrape && window.__jobBotScrape.abortRequested);
     const finishEarly = () =>
       Boolean(window.__jobBotScrape && window.__jobBotScrape.finishEarlyRequested);
+
+    const collected = [];
+    const seenJobIds = new Set();
 
     const scrapeStopped = () => {
       if (aborted()) return { aborted: true, jobs: collected };
@@ -81,218 +86,11 @@ export function buildLinkedInJobsListScrapeExpression(
     }
 
     function descriptionPreviewFromFull(text) {
-      const oneLine = normalizeInline(text || '');
+      const oneLine = li.normalizeInline(text || '');
       if (!oneLine) return 'N/A';
       if (oneLine.length <= 100) return oneLine;
       return oneLine.slice(0, 100) + '…';
     }
-
-    const getCurrentJobId = () => {
-      const searchParams = new URLSearchParams(window.location.search);
-      const fromQuery = searchParams.get('currentJobId');
-      if (fromQuery && /^\\d+$/.test(fromQuery)) return fromQuery;
-      const pathMatch = window.location.pathname.match(/\\/jobs\\/view\\/(\\d+)/);
-      if (pathMatch) return pathMatch[1];
-      return '';
-    };
-
-    const extractJobIdFromHref = (href) => {
-      if (!href) return '';
-      const match = href.match(/\\/jobs\\/view\\/(\\d+)/);
-      return match ? match[1] : '';
-    };
-
-    const buildCanonicalJobLink = (href, knownJobId) => {
-      const id = knownJobId || extractJobIdFromHref(href);
-      if (id) return 'https://www.linkedin.com/jobs/view/' + id + '/';
-      return href || '';
-    };
-
-    const expandAboutSection = () => {
-      const aboutHeading = Array.from(document.querySelectorAll('h2')).find(
-        (h2) => normalizeInline(h2.textContent).toLowerCase() === 'about the job'
-      );
-      const scope = aboutHeading
-        ? aboutHeading.closest('div[componentkey], section, article, div') || document.body
-        : document.body;
-      scope.scrollIntoView({ block: 'center', behavior: 'instant' });
-      const buttons = Array.from(scope.querySelectorAll('button, a[role="button"], span[role="button"]'));
-      const moreBtn = buttons.find((b) => {
-        const t = normalizeInline(b.textContent || '').toLowerCase();
-        return (
-          t.includes('show more') ||
-          t.includes('read more') ||
-          (t.length <= 12 && t.includes('more'))
-        );
-      });
-      if (moreBtn && moreBtn instanceof HTMLElement && moreBtn.offsetParent !== null) {
-        moreBtn.click();
-        return true;
-      }
-      return false;
-    };
-
-    const getTitleAndLink = () => {
-      const currentJobId = getCurrentJobId();
-      const anchors = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]')).filter((a) => {
-        const text = normalizeInline(a.textContent);
-        return Boolean(text);
-      });
-      let chosenAnchor = null;
-      if (currentJobId) {
-        chosenAnchor =
-          anchors.find((a) => {
-            const href = a.getAttribute('href') || '';
-            return href.includes('/jobs/view/' + currentJobId);
-          }) || null;
-      }
-      if (!chosenAnchor && anchors.length > 0) {
-        chosenAnchor = anchors[0];
-      }
-      const titleFromAnchor = normalizeInline(chosenAnchor?.textContent || '');
-      const linkFromAnchor = chosenAnchor?.href || '';
-      const titleTagText = normalizeInline(document.title.split('|')[0] || '');
-      return {
-        title: titleFromAnchor || titleTagText || na,
-        link: buildCanonicalJobLink(linkFromAnchor, currentJobId) || window.location.href,
-      };
-    };
-
-    const getCompany = () => {
-      const companyAnchor = document.querySelector('[aria-label^="Company,"] a[href*="/company/"]');
-      if (companyAnchor) {
-        const text = normalizeInline(companyAnchor.textContent);
-        if (text) return text;
-      }
-      const companyContainer = document.querySelector('[aria-label^="Company,"]');
-      if (companyContainer) {
-        const label = companyContainer.getAttribute('aria-label') || '';
-        const parsed = normalizeInline(label.replace(/^Company,\\s*/i, '').replace(/\\.$/, ''));
-        if (parsed) return parsed;
-      }
-      const titleParts = document.title.split('|').map((part) => normalizeInline(part)).filter(Boolean);
-      if (titleParts.length >= 2) return titleParts[1];
-      return na;
-    };
-
-    const getDescription = () => {
-      const descriptionSelectors = [
-        'div[componentkey^="JobDetails_AboutTheJob_"] [data-testid="expandable-text-box"]',
-        'div[data-sdui-component="com.linkedin.sdui.generated.jobseeker.dsl.impl.aboutTheJob"] [data-testid="expandable-text-box"]',
-      ];
-      for (const selector of descriptionSelectors) {
-        const node = document.querySelector(selector);
-        const text = normalizeMultiline(node?.innerText || node?.textContent || '');
-        if (text) return text;
-      }
-      const aboutHeading = Array.from(document.querySelectorAll('h2')).find(
-        (h2) => normalizeInline(h2.textContent).toLowerCase() === 'about the job'
-      );
-      if (aboutHeading) {
-        const container =
-          aboutHeading.closest('div[componentkey], div[data-sdui-component], section, div') || aboutHeading.parentElement;
-        const text = normalizeMultiline(container?.innerText || '');
-        if (text) return text;
-      }
-      return na;
-    };
-
-    const getLocation = (titleAnchor) => {
-      const isNoise = (segment) => {
-        const lower = segment.toLowerCase();
-        return (
-          lower.includes('reposted') ||
-          lower.includes('ago') ||
-          lower.includes('people clicked apply') ||
-          lower.includes('people applied') ||
-          lower.includes('promoted by') ||
-          lower.includes('responses managed')
-        );
-      };
-      if (titleAnchor) {
-        const candidates = [];
-        let node = titleAnchor.parentElement;
-        for (let i = 0; node && i < 5; i += 1) {
-          candidates.push(...Array.from(node.querySelectorAll('p')));
-          node = node.parentElement;
-        }
-        for (const paragraph of candidates) {
-          const line = normalizeInline(paragraph.innerText || paragraph.textContent || '');
-          if (!line || !line.includes('·')) continue;
-          const parts = line
-            .split('·')
-            .map((part) => normalizeInline(part))
-            .filter(Boolean)
-            .filter((part) => !isNoise(part));
-          if (parts.length > 0) return parts[0];
-        }
-      }
-      const bodyText = normalizeInline(document.body?.innerText || '');
-      const locationPatterns = [
-        /\\b[A-Z][a-z]+(?:\\s[A-Z][a-z]+)*,\\s?[A-Z]{2}(?:\\s*\\([^)]+\\))?\\b/,
-        /\\b[A-Z][A-Za-z]+(?:\\s[A-Z][A-Za-z]+)*\\s+\\(Remote\\)\\b/,
-        /\\bRemote\\b/i,
-      ];
-      for (const pattern of locationPatterns) {
-        const match = bodyText.match(pattern);
-        if (match) return normalizeInline(match[0]);
-      }
-      return na;
-    };
-
-    /**
-     * Extracts a short salary/comp range string from the job description or compact UI chips.
-     * Avoids matching on large layout nodes: span/p/div ancestors often include a salary substring
-     * plus the entire split-pane DOM text, so we only accept short strings and pick the shortest.
-     */
-    const getSalary = (descriptionText) => {
-      const joinedDescription = normalizeInline(descriptionText);
-      const salaryPatterns = [
-        /Pay Range:\\s*:?\\s*:?[^\\$]{0,40}\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\s*USD)?\\s*-\\s*\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\s*USD)?/i,
-        /\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?(?:\\s*[A-Za-z]{2,4})?\\s*-\\s*\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?(?:\\s*[A-Za-z]{2,4})?/i,
-        /\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?\\s*-\\s*\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?\\s*(?:annually|yearly|per year|\\/yr|\\/year)?/i,
-        /\\$\\s?\\d{2,3}K\\s*-\\s*\\$\\s?\\d{2,3}K(?:\\s*\\/\\s*\\w+)?/i,
-        /base salary range[^.]{0,160}\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?[^.]{0,80}\\$\\s?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?/i,
-      ];
-      for (const pattern of salaryPatterns) {
-        const match = joinedDescription.match(pattern);
-        if (match) return normalizeInline(match[0]);
-      }
-      const maxChipLen = 160;
-      const looksLikeSalaryChip = (text) =>
-        /\\$\\s?\\d{2,3}K\\s*\\/\\s*\\w+/i.test(text) ||
-        /\\$\\s?\\d{1,3}(?:,\\d{3})*\\s*-\\s*\\$\\s?\\d{1,3}(?:,\\d{3})/.test(text);
-      const chipCandidates = Array.from(document.querySelectorAll('span, p, div'))
-        .map((node) => normalizeInline(node.textContent || ''))
-        .filter((text) => text.length > 0 && text.length <= maxChipLen && looksLikeSalaryChip(text));
-      if (chipCandidates.length === 0) return na;
-      chipCandidates.sort((a, b) => a.length - b.length);
-      return chipCandidates[0];
-    };
-
-    const getCurrentDetails = () => {
-      const currentJobId = getCurrentJobId();
-      const anchorCandidates = Array.from(document.querySelectorAll('a[href*="/jobs/view/"]'));
-      const titleAnchor =
-        anchorCandidates.find((a) => (a.getAttribute('href') || '').includes('/jobs/view/' + currentJobId)) ||
-        anchorCandidates[0] ||
-        null;
-      const titleLink = getTitleAndLink();
-      const company = getCompany();
-      const description = getDescription();
-      const salary = getSalary(description);
-      const location = getLocation(titleAnchor);
-      const idFromLink = extractJobIdFromHref(titleLink.link);
-      return {
-        title: titleLink.title || na,
-        company: company || na,
-        link: titleLink.link || na,
-        salary: salary || na,
-        location: location || na,
-        description: description || na,
-        externalId: idFromLink || currentJobId || '',
-      };
-    };
 
     const getScrollableResultsContainer = () => {
       const selectors = [
@@ -384,7 +182,7 @@ export function buildLinkedInJobsListScrapeExpression(
       const candidates = Array.from(document.querySelectorAll('button, a'));
       const nextBtn = candidates.find((el) => {
         const label = (el.getAttribute('aria-label') || '').toLowerCase();
-        const text = normalizeInline(el.textContent || '').toLowerCase();
+        const text = li.normalizeInline(el.textContent || '').toLowerCase();
         return (
           label.includes('next') ||
           text === 'next' ||
@@ -398,9 +196,6 @@ export function buildLinkedInJobsListScrapeExpression(
       nextBtn.click();
       return true;
     };
-
-    const collected = [];
-    const seenJobIds = new Set();
 
     try {
       for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex += 1) {
@@ -458,20 +253,30 @@ export function buildLinkedInJobsListScrapeExpression(
               if (st) return st;
             }
 
-            const about = Array.from(document.querySelectorAll('h2')).find(
-              (h2) => normalizeInline(h2.textContent).toLowerCase() === 'about the job'
-            );
+            const detailRoot = li.findJobDetailRoot(document);
+            const about = detailRoot
+              ? Array.from(detailRoot.querySelectorAll('h2')).find(
+                  (h2) => li.normalizeInline(h2.textContent).toLowerCase() === 'about the job'
+                )
+              : Array.from(document.querySelectorAll('h2')).find(
+                  (h2) => li.normalizeInline(h2.textContent).toLowerCase() === 'about the job'
+                );
             if (about) {
               about.scrollIntoView({ block: 'center', behavior: 'instant' });
             }
             await sleep(400);
-            const expanded = expandAboutSection();
+            const expanded = li.expandAboutSection(document, detailRoot);
             if (expanded) {
               await sleep(450);
             }
 
-            const details = getCurrentDetails();
-            const jobId = details.externalId || extractJobIdFromHref(details.link);
+            const details = li.getCurrentDetails(document, window);
+            const integrity = li.verifyCaptureIntegrity(details);
+            if (!integrity.ok) {
+              continue;
+            }
+
+            const jobId = details.externalId || li.extractJobIdFromHref(details.link);
             if (!jobId || !/^\\d+$/.test(String(jobId))) {
               continue;
             }
@@ -483,9 +288,11 @@ export function buildLinkedInJobsListScrapeExpression(
             const canonicalUrl = 'https://www.linkedin.com/jobs/view/' + jobId + '/';
             const snippetSource = details.description !== na ? details.description : '';
             const snippet =
-              normalizeInline(snippetSource).length > 600
-                ? normalizeInline(snippetSource).slice(0, 600) + '…'
-                : normalizeInline(snippetSource);
+              li.normalizeInline(snippetSource).length > 600
+                ? li.normalizeInline(snippetSource).slice(0, 600) + '…'
+                : li.normalizeInline(snippetSource);
+
+            const salaryTextOut = details.salary !== na ? details.salary : undefined;
 
             const jobRecord = {
               externalId: String(jobId),
@@ -493,12 +300,13 @@ export function buildLinkedInJobsListScrapeExpression(
               title: details.title,
               company: details.company,
               location: details.location !== na ? details.location : undefined,
-              salaryText: details.salary !== na ? details.salary : undefined,
+              salaryText: salaryTextOut,
               descriptionSnippet: snippet || undefined,
               rawPayload: {
                 link: details.link,
                 pageIndex: pageIndex,
                 round: round,
+                extractionDiagnostics: details.extractionDiagnostics,
               },
             };
             collected.push(jobRecord);

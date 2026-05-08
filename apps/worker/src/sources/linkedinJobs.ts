@@ -385,11 +385,29 @@ type BundleOutcome =
 export async function collectLinkedInPostings(params: {
   runId: Id<'scrape_runs'>;
   linkedinSearchQuery?: string;
+  linkedinLocation?: string;
   driver: ChromeDriver;
   env: NodeJS.ProcessEnv;
   /** When set (worker orchestrator), each scraped job is pushed over CDP and upserted immediately. */
   streamPosting?: (posting: ScrapedPostingInput) => Promise<void>;
 }): Promise<ScrapeResult> {
+  // #region agent log
+  fetch('http://127.0.0.1:7497/ingest/a72e9a30-5649-4c67-82f3-8d4eaa4b35cd', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': '779013',
+    },
+    body: JSON.stringify({
+      sessionId: '779013',
+      location: 'linkedinJobs.ts:collectLinkedInPostings',
+      message: 'collectLinkedInPostings body entered',
+      data: { runId: params.runId, hypothesisId: 'A' },
+      timestamp: Date.now(),
+      hypothesisId: 'A',
+    }),
+  }).catch(() => {});
+  // #endregion
   const debugMode: LinkedInDebugSteps = parseLinkedInDebugSteps(params.env);
   const linkedInMaxPages = parseLinkedInPagesFromEnv(params.env);
   const linkedInMaxPostings = parseLinkedInMaxPostingsFromEnv(params.env);
@@ -402,7 +420,8 @@ export async function collectLinkedInPostings(params: {
   }
 
   const queryRaw = params.linkedinSearchQuery?.trim() ?? '';
-  const useKeywordPath = queryRaw.length > 0;
+  const locationRaw = params.linkedinLocation?.trim() ?? '';
+  const useSearchPath = queryRaw.length > 0 || locationRaw.length > 0;
 
   const autoLogin = parseLinkedInAutoLoginFromEnv(params.env);
   if (autoLogin) {
@@ -462,18 +481,30 @@ export async function collectLinkedInPostings(params: {
       workerLog.info('linkedin.stream_posting', { phase: 'binding_installed' });
     }
 
-    if (useKeywordPath) {
-      const kwUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(queryRaw)}`;
-      workerLog.info('linkedin.navigate', { path: 'keyword', url: kwUrl });
-      await params.driver.navigate(kwUrl, { timeoutMs: 60_000 });
+    if (useSearchPath) {
+      const searchParams = new URLSearchParams();
+      if (queryRaw.length > 0) {
+        searchParams.set('keywords', queryRaw);
+      }
+      if (locationRaw.length > 0) {
+        searchParams.set('location', locationRaw);
+      }
+      const searchUrl = `https://www.linkedin.com/jobs/search/?${searchParams.toString()}`;
+      workerLog.info('linkedin.navigate', {
+        path: 'search',
+        url: searchUrl,
+        hasKeywords: queryRaw.length > 0,
+        hasLocation: locationRaw.length > 0,
+      });
+      await params.driver.navigate(searchUrl, { timeoutMs: 60_000 });
       await waitForLinkedInJobsShell(params.driver, 15 * 60 * 1000, autoLogin);
       await injectOverlayIfNeeded();
       if (debugMode !== 'none') {
         workerLog.info('linkedin.debug_step', {
-          phase: 'after_navigation_keyword',
+          phase: 'after_navigation_search',
         });
         await linkedInWaitStep(params.driver, {
-          stepLabel: 'After navigation (keyword search shell)',
+          stepLabel: 'After navigation (search results shell)',
         });
       }
     } else {
@@ -596,6 +627,27 @@ export async function collectLinkedInPostings(params: {
       },
     }));
 
+    // #region agent log
+    fetch('http://127.0.0.1:7497/ingest/a72e9a30-5649-4c67-82f3-8d4eaa4b35cd', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '779013',
+      },
+      body: JSON.stringify({
+        sessionId: '779013',
+        location: 'linkedinJobs.ts:collectLinkedInPostings',
+        message: 'collectLinkedInPostings returning success',
+        data: {
+          runId: params.runId,
+          postingsCount: postings.length,
+          verify: 'post-await-fix',
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'A',
+      }),
+    }).catch(() => {});
+    // #endregion
     return {
       postings,
       stats: {

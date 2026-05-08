@@ -16,14 +16,34 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * Parses common boolean-style env values (`1/0`, `true/false`, `yes/no`, `on/off`).
+ * Returns `defaultValue` when the value is missing or unrecognized.
+ */
+function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) {
+    return defaultValue;
+  }
+  const lower = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(lower)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(lower)) {
+    return false;
+  }
+  return defaultValue;
+}
+
 export function createWorkerRuntime(): WorkerScheduler {
   const convexUrl = requireEnv('CONVEX_URL');
   const concurrencyRaw = Number(process.env.WORKER_QUEUE_CONCURRENCY ?? '2');
   const concurrency = Number.isFinite(concurrencyRaw) && concurrencyRaw > 0 ? concurrencyRaw : 2;
+  const enableLlmRanking = parseEnvBool(process.env.WORKER_ENABLE_LLM_RANKING, true);
 
   const orchestrator = new WorkerOrchestrator({
     convexUrl,
     concurrency,
+    enableLlmRanking,
   });
   const schedulerConfig = loadSchedulerConfigFromEnv(process.env);
   return new WorkerScheduler(orchestrator, schedulerConfig);

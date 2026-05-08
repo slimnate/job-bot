@@ -15,6 +15,7 @@
  * Usage:
  *   node --env-file=.env.local scripts/trigger-linkedin-run.mjs
  *   npm run trigger:linkedin -- --query "optional keywords"
+ *   npm run trigger:linkedin -- --query "optional keywords" --location "Austin, TX"
  *
  * Flags:
  *   --no-start-worker     Do not import/start the worker; only queue + POST /trigger (needs a worker elsewhere).
@@ -40,11 +41,14 @@ const REPO_ROOT = join(__dirname, '..');
 const WORKER_DIST_INDEX = join(REPO_ROOT, 'apps/worker/dist/index.js');
 
 function parseArgs(argv) {
-  /** @type {{ query?: string; noStartWorker: boolean; skipWorkerBuild: boolean; noWait: boolean }} */
+  /** @type {{ query?: string; location?: string; noStartWorker: boolean; skipWorkerBuild: boolean; noWait: boolean }} */
   const out = { noStartWorker: false, skipWorkerBuild: false, noWait: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--query' && argv[i + 1] !== undefined) {
       out.query = argv[i + 1];
+      i++;
+    } else if (argv[i] === '--location' && argv[i + 1] !== undefined) {
+      out.location = argv[i + 1];
       i++;
     } else if (argv[i] === '--no-start-worker') {
       out.noStartWorker = true;
@@ -250,10 +254,11 @@ async function main() {
       console.log('Worker trigger already reachable; using existing worker process.');
     }
 
-    const payload =
-      options.query !== undefined
-        ? { source: 'linkedin', linkedinSearchQuery: options.query }
-        : { source: 'linkedin' };
+    const payload = {
+      source: 'linkedin',
+      ...(options.query !== undefined ? { linkedinSearchQuery: options.query } : {}),
+      ...(options.location !== undefined ? { linkedinLocation: options.location } : {}),
+    };
 
     const result = await client.mutation(api.runs.trigger, payload);
     console.log('Queued:', JSON.stringify(result, null, 2));

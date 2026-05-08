@@ -14,6 +14,7 @@ export async function collectPostingsForSource(params: {
   runId: Id<'scrape_runs'>;
   source: string;
   linkedinSearchQuery?: string;
+  linkedinLocation?: string;
   /** LinkedIn: upsert each posting as soon as it is scraped (orchestrator only). */
   streamPosting?: (posting: ScrapedPostingInput) => Promise<void>;
 }): Promise<ScrapeResult> {
@@ -29,14 +30,49 @@ export async function collectPostingsForSource(params: {
             'LinkedIn scraping requires Chrome with CDP. Set WORKER_USE_CHROME=1 (and usually WORKER_CHROME_HEADLESS=0 for login); `npm run dev:all` sets these on the worker. Chrome starts when the first LinkedIn scrape runs, not at worker boot. To attach your own browser instead of spawning one, set WORKER_MANAGE_CHROME=0 and use WORKER_CHROME_PORT.'
           );
         }
-        return collectLinkedInPostings({
+        // #region agent log
+        fetch('http://127.0.0.1:7497/ingest/a72e9a30-5649-4c67-82f3-8d4eaa4b35cd', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': '779013',
+          },
+          body: JSON.stringify({
+            sessionId: '779013',
+            location: 'sourceAdapters.ts:linkedin',
+            message: 'after ensure; about to return collectLinkedInPostings promise',
+            data: { runId: params.runId, hypothesisId: 'A' },
+            timestamp: Date.now(),
+            hypothesisId: 'A',
+          }),
+        }).catch(() => {});
+        // #endregion
+        return await collectLinkedInPostings({
           runId: params.runId,
           linkedinSearchQuery: params.linkedinSearchQuery,
+          linkedinLocation: params.linkedinLocation,
           driver,
           env: process.env,
           streamPosting: params.streamPosting,
         });
       } finally {
+        // #region agent log
+        fetch('http://127.0.0.1:7497/ingest/a72e9a30-5649-4c67-82f3-8d4eaa4b35cd', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': '779013',
+          },
+          body: JSON.stringify({
+            sessionId: '779013',
+            location: 'sourceAdapters.ts:linkedin_finally',
+            message: 'finally: closing chrome after linkedin scrape',
+            data: { hypothesisId: 'A' },
+            timestamp: Date.now(),
+            hypothesisId: 'A',
+          }),
+        }).catch(() => {});
+        // #endregion
         await closeWorkerChromeAfterLinkedInScrape();
       }
     });

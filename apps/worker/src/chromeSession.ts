@@ -18,6 +18,11 @@ export type WorkerChromeSessionOptions = {
   headless: boolean;
   /** When true (default), spawn Chrome. When false, connect to an existing DevTools port. */
   manageChrome: boolean;
+  /**
+   * When true (default), close/detach Chrome after each LinkedIn scrape run.
+   * Disable for local debugging sessions where you want to keep the browser instance alive.
+   */
+  autoCleanupAfterLinkedInScrape: boolean;
   port: number;
   executablePath?: string;
 };
@@ -47,6 +52,7 @@ export function loadWorkerChromeSessionOptionsFromEnv(
     enabled: parseEnvBool(env.WORKER_USE_CHROME, false),
     headless: parseEnvBool(env.WORKER_CHROME_HEADLESS, true),
     manageChrome: parseEnvBool(env.WORKER_MANAGE_CHROME, true),
+    autoCleanupAfterLinkedInScrape: parseEnvBool(env.WORKER_AUTO_CLEANUP_CHROME, true),
     port,
     executablePath: env.CHROME_PATH,
   };
@@ -244,6 +250,13 @@ export class WorkerChromeSession {
    */
   async closeAfterLinkedInScrape(): Promise<void> {
     if (!this.options.enabled) {
+      return;
+    }
+    if (!this.options.autoCleanupAfterLinkedInScrape) {
+      workerLog.info('chrome.session', {
+        phase: 'cleanup_skipped_after_scrape',
+        port: this.options.port,
+      });
       return;
     }
     if (this.options.manageChrome) {

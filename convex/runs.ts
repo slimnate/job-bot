@@ -56,6 +56,7 @@ export const trigger = mutation({
     criteriaId: v.optional(v.id('job_criteria')),
     source: v.optional(v.string()),
     linkedinSearchQuery: v.optional(v.string()),
+    linkedinLocation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -79,12 +80,19 @@ export const trigger = mutation({
         : args.linkedinSearchQuery.trim() === ''
           ? undefined
           : args.linkedinSearchQuery.trim();
+    const linkedinLocation =
+      args.linkedinLocation === undefined
+        ? undefined
+        : args.linkedinLocation.trim() === ''
+          ? undefined
+          : args.linkedinLocation.trim();
 
     for (const source of resolvedSources) {
       const runId = await ctx.db.insert('scrape_runs', {
         criteriaId: criteria?._id,
         source,
         linkedinSearchQuery: linkedinQuery,
+        linkedinLocation,
         status: 'queued',
         startedAt: now,
         createdAt: now,
@@ -108,6 +116,7 @@ export const updateQueued = mutation({
     source: v.optional(v.string()),
     criteriaId: v.optional(v.union(v.id('job_criteria'), v.null())),
     linkedinSearchQuery: v.optional(v.union(v.string(), v.null())),
+    linkedinLocation: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const run = await ctx.db.get(args.runId);
@@ -120,7 +129,8 @@ export const updateQueued = mutation({
     if (
       args.source === undefined &&
       args.criteriaId === undefined &&
-      args.linkedinSearchQuery === undefined
+      args.linkedinSearchQuery === undefined &&
+      args.linkedinLocation === undefined
     ) {
       return;
     }
@@ -130,6 +140,7 @@ export const updateQueued = mutation({
       source?: string;
       criteriaId?: typeof run.criteriaId;
       linkedinSearchQuery?: string | undefined;
+      linkedinLocation?: string | undefined;
       updatedAt: number;
     } = { updatedAt: now };
 
@@ -158,6 +169,13 @@ export const updateQueued = mutation({
         patch.linkedinSearchQuery = undefined;
       } else {
         patch.linkedinSearchQuery = args.linkedinSearchQuery.trim();
+      }
+    }
+    if (args.linkedinLocation !== undefined) {
+      if (args.linkedinLocation === null || args.linkedinLocation.trim() === '') {
+        patch.linkedinLocation = undefined;
+      } else {
+        patch.linkedinLocation = args.linkedinLocation.trim();
       }
     }
 

@@ -21,6 +21,11 @@ type QueuePayload = {
   source: string;
 };
 
+type LinkedInRunFields = {
+  linkedinSearchQuery?: string;
+  linkedinLocation?: string;
+};
+
 type RecomputeResponse = {
   criteria: Doc<'job_criteria'> | null;
   model: string;
@@ -62,12 +67,14 @@ function formatWorkerError(error: unknown): string {
 export class WorkerOrchestrator {
   private readonly convex: ConvexHttpClient;
   private readonly queue: InMemoryTaskQueue<QueuePayload>;
+  private readonly enableLlmRanking: boolean;
   /** Run IDs already handed to the in-memory queue (or running). Prevents duplicate work from scheduler + DB. */
   private readonly inflightRunIds = new Set<string>();
 
-  constructor(params: { convexUrl: string; concurrency: number }) {
+  constructor(params: { convexUrl: string; concurrency: number; enableLlmRanking?: boolean }) {
     this.convex = new ConvexHttpClient(params.convexUrl);
     this.queue = new InMemoryTaskQueue<QueuePayload>(params.concurrency);
+    this.enableLlmRanking = params.enableLlmRanking ?? true;
   }
 
   private runConvex<T>(label: string, operation: () => Promise<T>): Promise<T> {
@@ -238,7 +245,8 @@ export class WorkerOrchestrator {
             collectPostingsForSource({
               runId: payload.runId,
               source: payload.source,
-              linkedinSearchQuery: runDoc.linkedinSearchQuery,
+              linkedinSearchQuery: (runDoc as LinkedInRunFields).linkedinSearchQuery,
+              linkedinLocation: (runDoc as LinkedInRunFields).linkedinLocation,
               streamPosting: async (posting) => {
                 const row = await this.runConvex(`postings.upsertBatch.stream:${payload.runId}`, () =>
                   this.convex.mutation(api.postings.upsertBatch, {
@@ -293,48 +301,59 @@ export class WorkerOrchestrator {
           processed: upsertResult.processed,
         });
 
-        const recompute = (await this.runConvex(`ranking.recompute:${payload.runId}`, () =>
-          this.convex.mutation(api.ranking.recompute, {
-            criteriaId: runDoc.criteriaId,
-            source: payload.source,
-            limit: 100,
-          })
-        )) as RecomputeResponse;
-
-        const candidatesForRun = recompute.candidates.filter(
-          (posting) => posting.scrapeRunId === payload.runId
-        );
-
-        workerLog.info('run.phase', {
-          phase: 'ranking_input',
-          runId: payload.runId,
-          source: payload.source,
-          candidateCount: candidatesForRun.length,
-        });
-
-        const rankingResult = await rankJobsWithLlm({
-          criteria: recompute.criteria,
-          model: recompute.model,
-          candidates: candidatesForRun as unknown as LlmRankingCandidate[],
-        });
-        const rankings = rankingResult.rankings;
-
-        if (rankings.length > 0) {
-          const saveResult = await this.runConvex(`ranking.upsertResults:${payload.runId}`, () =>
-            this.convex.mutation(api.ranking.upsertResults, {
-              criteriaId: recompute.criteria?._id,
-              scrapeRunId: payload.runId,
-              model: rankingResult.model,
-              rankings,
+        let rankedCount = 0;
+        if (this.enableLlmRanking) {
+          const recompute = (await this.runConvex(`ranking.recompute:${payload.runId}`, () =>
+            this.convex.mutation(api.ranking.recompute, {
+              criteriaId: runDoc.criteriaId,
+              source: payload.source,
+              limit: 100,
             })
+          )) as RecomputeResponse;
+
+          const candidatesForRun = recompute.candidates.filter(
+            (posting) => posting.scrapeRunId === payload.runId
           );
 
           workerLog.info('run.phase', {
-            phase: 'rankings_saved',
+            phase: 'ranking_input',
             runId: payload.runId,
             source: payload.source,
-            saved: saveResult.saved,
-            dedupedInBatch: saveResult.dedupedInBatch,
+            candidateCount: candidatesForRun.length,
+          });
+
+          const rankingResult = await rankJobsWithLlm({
+            criteria: recompute.criteria,
+            model: recompute.model,
+            candidates: candidatesForRun as unknown as LlmRankingCandidate[],
+          });
+          const rankings = rankingResult.rankings;
+          rankedCount = rankings.length;
+
+          if (rankings.length > 0) {
+            const saveResult = await this.runConvex(`ranking.upsertResults:${payload.runId}`, () =>
+              this.convex.mutation(api.ranking.upsertResults, {
+                criteriaId: recompute.criteria?._id,
+                scrapeRunId: payload.runId,
+                model: rankingResult.model,
+                rankings,
+              })
+            );
+
+            workerLog.info('run.phase', {
+              phase: 'rankings_saved',
+              runId: payload.runId,
+              source: payload.source,
+              saved: saveResult.saved,
+              dedupedInBatch: saveResult.dedupedInBatch,
+            });
+          }
+        } else {
+          workerLog.info('run.phase', {
+            phase: 'ranking_skipped',
+            runId: payload.runId,
+            source: payload.source,
+            reason: 'WORKER_ENABLE_LLM_RANKING=0',
           });
         }
 
@@ -347,7 +366,7 @@ export class WorkerOrchestrator {
               discoveredCount: collected.stats.discoveredCount,
               dedupedCount: upsertResult.updated + collected.stats.dedupedCount,
               insertedCount: insertedTotal,
-              rankedCount: rankings.length,
+              rankedCount,
               errorCount: 0,
             },
           })

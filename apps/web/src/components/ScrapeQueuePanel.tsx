@@ -14,6 +14,9 @@ function isLinkedInSource(source: string): boolean {
 }
 
 type QueuedRun = Doc<'scrape_runs'>;
+type QueuedRunLinkedInFields = QueuedRun & {
+  linkedinLocation?: string;
+};
 
 export function ScrapeQueuePanel() {
   const criteriaList = useQuery(api.criteria.list, { limit: 50 });
@@ -26,6 +29,7 @@ export function ScrapeQueuePanel() {
 
   const [newSource, setNewSource] = useState('linkedin');
   const [newLinkedinQuery, setNewLinkedinQuery] = useState('');
+  const [newLinkedinLocation, setNewLinkedinLocation] = useState('');
   const [newCriteriaId, setNewCriteriaId] = useState('');
   const [queueMessage, setQueueMessage] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -38,6 +42,7 @@ export function ScrapeQueuePanel() {
   const [editingId, setEditingId] = useState<Id<'scrape_runs'> | null>(null);
   const [editSource, setEditSource] = useState('');
   const [editLinkedinQuery, setEditLinkedinQuery] = useState('');
+  const [editLinkedinLocation, setEditLinkedinLocation] = useState('');
   const [editCriteriaId, setEditCriteriaId] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -68,6 +73,7 @@ export function ScrapeQueuePanel() {
     setEditingId(null);
     setEditSource('');
     setEditLinkedinQuery('');
+    setEditLinkedinLocation('');
     setEditCriteriaId('');
   };
 
@@ -75,6 +81,7 @@ export function ScrapeQueuePanel() {
     setEditingId(run._id);
     setEditSource(run.source.trim());
     setEditLinkedinQuery(run.linkedinSearchQuery ?? '');
+    setEditLinkedinLocation((run as QueuedRunLinkedInFields).linkedinLocation ?? '');
     setEditCriteriaId(run.criteriaId ?? '');
   };
 
@@ -96,11 +103,18 @@ export function ScrapeQueuePanel() {
           : newLinkedinQuery.trim() === ''
             ? undefined
             : newLinkedinQuery.trim();
+      const linkedinLocation =
+        !isLinkedInSource(source)
+          ? undefined
+          : newLinkedinLocation.trim() === ''
+            ? undefined
+            : newLinkedinLocation.trim();
 
       const result = await triggerRun({
         criteriaId,
         source,
         linkedinSearchQuery,
+        linkedinLocation,
       });
       setQueueMessage(`Queued ${result.runIds.length} run(s).`);
     } catch (error) {
@@ -135,6 +149,11 @@ export function ScrapeQueuePanel() {
           : editLinkedinQuery.trim() === ''
             ? null
             : editLinkedinQuery.trim(),
+        linkedinLocation: !isLinkedInSource(trimmed)
+          ? null
+          : editLinkedinLocation.trim() === ''
+            ? null
+            : editLinkedinLocation.trim(),
       });
       resetEdit();
       setQueueMessage('Queue entry updated.');
@@ -223,6 +242,7 @@ export function ScrapeQueuePanel() {
                 setNewSource(value);
                 if (!isLinkedInSource(value)) {
                   setNewLinkedinQuery('');
+                  setNewLinkedinLocation('');
                 }
               }}
               aria-label='Source for new queue entry'
@@ -259,12 +279,21 @@ export function ScrapeQueuePanel() {
               <input
                 value={newLinkedinQuery}
                 onChange={(event) => setNewLinkedinQuery(event.target.value)}
-                placeholder='Keywords — leave empty for Jobs based on your preferences'
+                placeholder='Keywords (optional)'
                 aria-label='LinkedIn search query'
               />
+            </label>
+            <label>
+              LinkedIn location (optional)
+              <input
+                value={newLinkedinLocation}
+                onChange={(event) => setNewLinkedinLocation(event.target.value)}
+                placeholder='City, state, or region'
+                aria-label='LinkedIn search location'
+              />
               <span className='panel-subtitle tight'>
-                Leave empty to use <strong>Jobs based on your preferences</strong> (Show all). Enter keywords for a
-                keyword search on LinkedIn.
+                Leave both fields empty to use <strong>Jobs based on your preferences</strong> (Show all). Enter
+                keywords and/or location for LinkedIn search results.
               </span>
             </label>
           </div>
@@ -277,6 +306,7 @@ export function ScrapeQueuePanel() {
             <tr>
               <th>Source</th>
               <th>LinkedIn query</th>
+              <th>LinkedIn location</th>
               <th>Criteria</th>
               <th>Queued at</th>
               <th>Actions</th>
@@ -285,11 +315,11 @@ export function ScrapeQueuePanel() {
           <tbody>
             {queuedRuns === undefined ? (
               <tr>
-                <td colSpan={5}>Loading queue…</td>
+                <td colSpan={6}>Loading queue…</td>
               </tr>
             ) : sortedQueued.length === 0 ? (
               <tr>
-                <td colSpan={5}>No queued runs. Add one above or use &quot;Trigger run&quot; below.</td>
+                <td colSpan={6}>No queued runs. Add one above or use &quot;Trigger run&quot; below.</td>
               </tr>
             ) : (
               sortedQueued.map((run) =>
@@ -303,6 +333,7 @@ export function ScrapeQueuePanel() {
                           setEditSource(value);
                           if (!isLinkedInSource(value)) {
                             setEditLinkedinQuery('');
+                            setEditLinkedinLocation('');
                           }
                         }}
                         aria-label='Edit source'
@@ -321,6 +352,18 @@ export function ScrapeQueuePanel() {
                           onChange={(event) => setEditLinkedinQuery(event.target.value)}
                           aria-label='Edit LinkedIn search query'
                           placeholder='Optional keywords'
+                        />
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>
+                      {isLinkedInSource(editSource) ? (
+                        <input
+                          value={editLinkedinLocation}
+                          onChange={(event) => setEditLinkedinLocation(event.target.value)}
+                          aria-label='Edit LinkedIn search location'
+                          placeholder='Optional location'
                         />
                       ) : (
                         '—'
@@ -358,6 +401,7 @@ export function ScrapeQueuePanel() {
                   <tr key={run._id}>
                     <td>{run.source}</td>
                     <td>{run.linkedinSearchQuery ?? '—'}</td>
+                    <td>{(run as QueuedRunLinkedInFields).linkedinLocation ?? '—'}</td>
                     <td>
                       {run.criteriaId
                         ? (criteriaNameById.get(run.criteriaId) ?? run.criteriaId)
