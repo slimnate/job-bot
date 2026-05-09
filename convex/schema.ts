@@ -76,6 +76,7 @@ export default defineSchema({
     company: v.string(),
     location: v.optional(v.string()),
     salaryText: v.optional(v.string()),
+    /** Full job description (multiline, line breaks preserved). Name kept for worker/API compatibility. */
     descriptionSnippet: v.optional(v.string()),
     postedAt: v.optional(v.number()),
     discoveredAt: v.number(),

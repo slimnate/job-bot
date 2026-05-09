@@ -92,7 +92,9 @@
     ];
     for (const sel of selectors) {
       const el = doc.querySelector(sel);
-      if (el && (el.innerText || '').trim().length > 80) return el;
+      if (!el) continue;
+      const probe = (el.innerText || el.textContent || '').trim();
+      if (probe.length > 80) return el;
     }
     const aboutHeading = Array.from(doc.querySelectorAll('h2')).find(
       (h2) => normalizeInline(h2.textContent).toLowerCase() === 'about the job'
@@ -180,6 +182,7 @@
     const descriptionSelectors = [
       'div[componentkey^="JobDetails_AboutTheJob_"] [data-testid="expandable-text-box"]',
       'div[data-sdui-component="com.linkedin.sdui.generated.jobseeker.dsl.impl.aboutTheJob"] [data-testid="expandable-text-box"]',
+      '[data-testid="expandable-text-box"]',
     ];
     for (const root of searchRoots) {
       for (const selector of descriptionSelectors) {
@@ -196,7 +199,7 @@
       const container =
         aboutHeading.closest('div[componentkey], div[data-sdui-component], section, div') ||
         aboutHeading.parentElement;
-      const text = normalizeMultiline(container?.innerText || '');
+      const text = normalizeMultiline(container?.innerText || container?.textContent || '');
       if (text) return text;
     }
     return na;
@@ -276,8 +279,8 @@
     if (!joined) return null;
     const salaryPatterns = [
       /Pay Range:\s*:?\s*:?[^\$]{0,40}\$\s?\d{1,3}(?:,\d{3})*(?:\s*USD)?\s*-\s*\$\s?\d{1,3}(?:,\d{3})*(?:\s*USD)?/i,
-      /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[A-Za-z]{2,4})?\s*-\s*\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[A-Za-z]{2,4})?/i,
       /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*-\s*\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*(?:annually|yearly|per year|\/yr|\/year)/i,
+      /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[A-Za-z]{2,4})?\s*-\s*\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[A-Za-z]{2,4})?/i,
       /\$\s?\d{2,3}K\s*-\s*\$\s?\d{2,3}K(?:\s*\/\s*\w+)?/i,
       /base salary range[^.]{0,160}\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?[^.]{0,80}\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?/i,
     ];

@@ -8,6 +8,7 @@ export type ScrapedPostingInput = {
   company: string;
   location?: string;
   salaryText?: string;
+  /** Full job description (multiline); Convex field name is legacy `descriptionSnippet`. */
   descriptionSnippet?: string;
   postedAt?: number;
   discoveredAt: number;

@@ -38,6 +38,8 @@ export function buildLinkedInJobsListScrapeExpression(
     const MAX_PAGES = ${pages};
     const MAX_COLLECTED_JOBS = ${maxCollectedJobsLiteral};
     const na = li.na;
+    /** Avoid pathological DOM dumps; full text is still very large vs. the old 600-char snippet. */
+    const DESCRIPTION_MAX_STORE_CHARS = 200000;
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -90,6 +92,16 @@ export function buildLinkedInJobsListScrapeExpression(
       if (!oneLine) return 'N/A';
       if (oneLine.length <= 100) return oneLine;
       return oneLine.slice(0, 100) + '…';
+    }
+
+    function clipDescriptionForStorage(multiline) {
+      const t = (multiline || '').trim();
+      if (!t) return '';
+      if (t.length <= DESCRIPTION_MAX_STORE_CHARS) return t;
+      return (
+        t.slice(0, DESCRIPTION_MAX_STORE_CHARS).replace(/\\s+$/, '') +
+        '\\n\\n[Description truncated by job-bot storage limit]'
+      );
     }
 
     const getScrollableResultsContainer = () => {
@@ -286,11 +298,10 @@ export function buildLinkedInJobsListScrapeExpression(
             }
             seenJobIds.add(jobIdKey);
             const canonicalUrl = 'https://www.linkedin.com/jobs/view/' + jobId + '/';
-            const snippetSource = details.description !== na ? details.description : '';
-            const snippet =
-              li.normalizeInline(snippetSource).length > 600
-                ? li.normalizeInline(snippetSource).slice(0, 600) + '…'
-                : li.normalizeInline(snippetSource);
+            const rawDescription = details.description !== na ? details.description : '';
+            const descriptionStored = rawDescription.trim()
+              ? clipDescriptionForStorage(li.normalizeMultiline(rawDescription))
+              : '';
 
             const salaryTextOut = details.salary !== na ? details.salary : undefined;
 
@@ -301,7 +312,7 @@ export function buildLinkedInJobsListScrapeExpression(
               company: details.company,
               location: details.location !== na ? details.location : undefined,
               salaryText: salaryTextOut,
-              descriptionSnippet: snippet || undefined,
+              descriptionSnippet: descriptionStored || undefined,
               rawPayload: {
                 link: details.link,
                 pageIndex: pageIndex,

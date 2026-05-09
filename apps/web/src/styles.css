@@ -677,10 +677,55 @@ button.btn-success:hover:not(:disabled) {
   color: #cbd5e1;
   line-height: 1.45;
   margin-bottom: 0.45rem;
+}
+
+.posting-item__description-text {
+  margin: 0;
+  word-break: break-word;
+}
+
+/* Long snippets: clamp the preview until the user expands */
+.posting-item__description--expandable:not(.posting-item__description--expanded) .posting-item__description-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
+}
+
+.posting-item__description:not(.posting-item__description--expandable) .posting-item__description-text,
+.posting-item__description--expanded .posting-item__description-text {
+  display: block;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.posting-item__description--expanded .posting-item__description-text {
+  max-height: 28rem;
+  overflow-y: auto;
+}
+
+.posting-item__description-toggle {
+  margin-top: 0.35rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.78rem;
+  color: #93c5fd;
+  text-decoration: underline;
+  cursor: pointer;
+  text-underline-offset: 0.12em;
+}
+
+.posting-item__description-toggle:hover {
+  color: #bfdbfe;
+}
+
+.posting-item__description-toggle:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .posting-item__ranking {
@@ -1102,6 +1147,13 @@ thead th {
 
 .details-grid dd {
   margin: 0;
+}
+
+.details-grid__description-full {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 28rem;
+  overflow-y: auto;
 }
 
 .details-grid__markdown {

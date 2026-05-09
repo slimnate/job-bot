@@ -49,6 +49,16 @@ export class RemoteOkDeterministicExtractor implements SourceExtractor {
     );
 
     const scraped = await driver.evaluate<RawRemoteOkPosting[]>(`(() => {
+      function normalizeMultiline(value) {
+        if (!value) return '';
+        return String(value)
+          .replace(/\\r/g, '')
+          .split('\\n')
+          .map((line) => String(line).replace(/\\s+/g, ' ').trim())
+          .filter(Boolean)
+          .join('\\n');
+      }
+
       const rows = Array.from(document.querySelectorAll('table#jobsboard tr.job'));
 
       return rows
@@ -81,7 +91,9 @@ export class RemoteOkDeterministicExtractor implements SourceExtractor {
             company: companyNode.textContent?.trim() ?? '',
             location: locationNode?.textContent?.trim() || undefined,
             salaryText: salaryNode?.textContent?.trim() || undefined,
-            descriptionSnippet: descriptionNode?.textContent?.trim() || undefined,
+            descriptionSnippet: descriptionNode
+              ? normalizeMultiline(descriptionNode.innerText || descriptionNode.textContent || '')
+              : undefined,
           };
         })
         .filter((posting) => posting !== null);

@@ -50,6 +50,52 @@ const formatDescriptionPreview = (descriptionSnippet?: string): { preview: strin
   return { preview: `${full.slice(0, DESCRIPTION_PREVIEW_MAX_CHARS - 1)}…`, full };
 };
 
+type PostingDescriptionProps = {
+  descriptionSnippet?: string;
+};
+
+/**
+ * Compact description line with optional expand/collapse when the snippet is longer than the preview cap.
+ * Preserves line breaks from the scraper when showing the full text.
+ */
+function PostingDescription({ descriptionSnippet }: PostingDescriptionProps) {
+  const { preview, full } = formatDescriptionPreview(descriptionSnippet);
+  const [expanded, setExpanded] = useState(false);
+  const expandable = full.length > DESCRIPTION_PREVIEW_MAX_CHARS;
+
+  if (!full) {
+    return (
+      <div className='posting-item__description'>
+        <p className='posting-item__description-text'>-</p>
+      </div>
+    );
+  }
+
+  const wrapperClass = [
+    'posting-item__description',
+    expandable ? 'posting-item__description--expandable' : '',
+    expandable && expanded ? 'posting-item__description--expanded' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div className={wrapperClass}>
+      <p className='posting-item__description-text'>{expanded ? full : preview}</p>
+      {expandable ? (
+        <button
+          type='button'
+          className='posting-item__description-toggle'
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+        >
+          {expanded ? 'Show less' : 'Show full description'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Normalizes unknown arrays into display-ready string items.
  */
@@ -287,7 +333,6 @@ export function PostingTable({
         {hasRows ? (
           <ul className='posting-list'>
             {postings!.map((posting) => {
-              const description = formatDescriptionPreview(posting.descriptionSnippet);
               const scoreOverall = posting.latestRanking?.scoreOverall;
               const scoreColorClass = getScoreColorClass(scoreOverall);
               return (
@@ -364,12 +409,7 @@ export function PostingTable({
                         {formatHumanizedTime(posting.discoveredAt)}
                       </span>
                     </div>
-                    <div
-                      className='posting-item__description'
-                      title={description.full || undefined}
-                    >
-                      {description.preview}
-                    </div>
+                    <PostingDescription descriptionSnippet={posting.descriptionSnippet} />
                     <RankingDetails ranking={posting.latestRanking} />
                   </article>
                 </li>
@@ -426,8 +466,10 @@ export function PostingTable({
                 </dd>
                 <dt>Salary</dt>
                 <dd>{selectedPosting.salaryText ?? '-'}</dd>
-                <dt>Description snippet</dt>
-                <dd>{selectedPosting.descriptionSnippet ?? '-'}</dd>
+                <dt>Description</dt>
+                <dd className='details-grid__description-full'>
+                  {selectedPosting.descriptionSnippet ?? '-'}
+                </dd>
               </dl>
               <details>
                 <summary>Raw JSON</summary>

@@ -19,6 +19,7 @@ export type ExtractorJobPosting = {
   company: string;
   location?: string;
   salaryText?: string;
+  /** Full job description when the extractor provides it (multiline). */
   descriptionSnippet?: string;
   postedAt?: number;
   discoveredAt: number;
