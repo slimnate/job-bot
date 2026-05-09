@@ -1,11 +1,12 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
-export const schemaVersion = 'slim_job_criteria';
+export const schemaVersion = 'job_sources_default_evaluator';
 
 export default defineSchema({
-  job_criteria: defineTable({
+  job_evaluators: defineTable({
     name: v.string(),
+    /** When true, the profile can be selected on queued runs. Worker default evaluator is `WORKER_DEFAULT_EVALUATOR_ID`, not this flag. */
     isActive: v.boolean(),
     /** Private to the user; never sent to the ranking LLM. */
     notes: v.optional(v.string()),
@@ -28,12 +29,18 @@ export default defineSchema({
   }).index('by_run_and_seq', ['runId', 'seq']),
 
   scrape_runs: defineTable({
-    criteriaId: v.optional(v.id('job_criteria')),
+    evaluatorId: v.optional(v.id('job_evaluators')),
     source: v.string(),
-    /** LinkedIn: empty/omitted = jobs hub "Jobs based on your preferences" path; non-empty = keyword search. */
-    linkedinSearchQuery: v.optional(v.string()),
-    /** LinkedIn search location filter (city/region text accepted by LinkedIn). */
-    linkedinLocation: v.optional(v.string()),
+    /**
+     * Source-specific run criteria (validated by backend source contract).
+     * Example for LinkedIn: { search?: string, location?: string }.
+     */
+    sourceCriteria: v.optional(v.record(v.string(), v.string())),
+    linkedinSearchStrategy: v.optional(
+      v.union(v.literal('ui'), v.literal('url_fallback'), v.literal('preferences_hub'))
+    ),
+    usedLinkedinUrlFallback: v.optional(v.boolean()),
+    linkedinFallbackReason: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),
       v.literal('running'),
@@ -83,7 +90,7 @@ export default defineSchema({
 
   job_rankings: defineTable({
     postingId: v.id('job_postings'),
-    criteriaId: v.optional(v.id('job_criteria')),
+    evaluatorId: v.optional(v.id('job_evaluators')),
     scrapeRunId: v.optional(v.id('scrape_runs')),
     rank: v.number(),
     scoreOverall: v.number(),
@@ -98,6 +105,35 @@ export default defineSchema({
     .index('by_posting', ['postingId'])
     .index('by_posting_ranked_at', ['postingId', 'rankedAt'])
     .index('by_score', ['scoreOverall']),
+
+  /**
+   * User-managed source enablement state; accepted criteria fields remain code-defined.
+   */
+  job_sources: defineTable({
+    source: v.string(),
+    displayName: v.string(),
+    isEnabled: v.boolean(),
+    /** Default ranking evaluator for runs of this source when `scrape_runs.evaluatorId` is unset. */
+    defaultEvaluatorId: v.optional(v.id('job_evaluators')),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_source', ['source'])
+    .index('by_enabled_and_source', ['isEnabled', 'source']),
+
+  /**
+   * User-managed reusable criteria combinations for a source.
+   * For LinkedIn: sourceCriteria supports keys `search` and `location`.
+   */
+  source_presets: defineTable({
+    source: v.string(),
+    name: v.string(),
+    sourceCriteria: v.record(v.string(), v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_source_and_updated_at', ['source', 'updatedAt'])
+    .index('by_source_and_name', ['source', 'name']),
 
   /**
    * LLM vendors for manual posting score (UI + scripts). `surface` tells the web app where execution runs.
@@ -123,4 +159,39 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index('by_provider_key', ['providerKey']),
+
+  /**
+   * Persisted scheduler status for a worker process. Singleton row per `workerId`
+   * (default `'default'`); the worker writes on start/stop/tick boundaries plus a
+   * heartbeat interval so the dashboard can render a reactive view and detect
+   * stale/dead workers via `now - heartbeatAt`.
+   *
+   * Field shape mirrors `WorkerSchedulerStatus` in `apps/worker/src/scheduler.ts`
+   * so the worker can serialize directly. Nullable runtime fields use
+   * `v.union(..., v.null())` instead of optionals to keep the JSON one-to-one
+   * across wire/storage.
+   */
+  worker_scheduler_status: defineTable({
+    workerId: v.string(),
+    intervalMs: v.number(),
+    intervalMinutes: v.number(),
+    runOnStart: v.boolean(),
+    schedulerStartedAt: v.union(v.number(), v.null()),
+    lastIntervalRingAt: v.union(v.number(), v.null()),
+    lastTickCompletedAt: v.union(v.number(), v.null()),
+    lastTickTrigger: v.union(v.string(), v.null()),
+    lastTickDurationMs: v.union(v.number(), v.null()),
+    lastTickQueueSnapshot: v.union(
+      v.object({ queued: v.number(), running: v.number() }),
+      v.null()
+    ),
+    nextIntervalTickAt: v.union(v.number(), v.null()),
+    timerActive: v.boolean(),
+    tickInFlight: v.boolean(),
+    lastTickFailedAt: v.union(v.number(), v.null()),
+    lastTickError: v.union(v.string(), v.null()),
+    /** Wall-clock time of the last heartbeat write; used client-side to detect a dead worker. */
+    heartbeatAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_worker_id', ['workerId']),
 });

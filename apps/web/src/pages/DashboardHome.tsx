@@ -30,10 +30,14 @@ export function DashboardHome() {
             <span className='dashboard-links-hint'>Search, filter, and sort the full list.</span>
           </li>
           <li>
-            <Link to='/criteria'>Criteria</Link>
+            <Link to='/evaluators'>Evaluators</Link>
             <span className='dashboard-links-hint'>
-              Multiple profiles, resume, and ranking instructions for the LLM.
+              Multiple evaluator profiles, resume context, and ranking instructions for the LLM.
             </span>
+          </li>
+          <li>
+            <Link to='/sources'>Sources</Link>
+            <span className='dashboard-links-hint'>Manage enabled sources and reusable source presets.</span>
           </li>
           <li>
             <Link to='/workers'>Workers</Link>

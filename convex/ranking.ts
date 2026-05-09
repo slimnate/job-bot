@@ -27,18 +27,17 @@ export const listForPosting = query({
 
 export const recompute = mutation({
   args: {
-    criteriaId: v.optional(v.id('job_criteria')),
+    evaluatorId: v.optional(v.id('job_evaluators')),
     source: v.optional(v.string()),
     limit: v.optional(v.number()),
     model: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const criteria =
-      (args.criteriaId ? await ctx.db.get(args.criteriaId) : null) ??
-      (await ctx.db
-        .query('job_criteria')
-        .withIndex('by_is_active', (q) => q.eq('isActive', true))
-        .first());
+    let evaluator = args.evaluatorId ? await ctx.db.get(args.evaluatorId) : null;
+    /** Inactive evaluators are not used for ranking (matches queue/trigger rules). */
+    if (evaluator && !evaluator.isActive) {
+      evaluator = null;
+    }
 
     const postings = args.source
       ? await ctx.db
@@ -52,7 +51,7 @@ export const recompute = mutation({
     const candidatePostings = ordered.slice(0, limit);
 
     return {
-      criteria,
+      evaluator,
       model: args.model ?? 'llm-default',
       candidates: candidatePostings,
     };
@@ -61,7 +60,7 @@ export const recompute = mutation({
 
 export const upsertResults = mutation({
   args: {
-    criteriaId: v.optional(v.id('job_criteria')),
+    evaluatorId: v.optional(v.id('job_evaluators')),
     scrapeRunId: v.optional(v.id('scrape_runs')),
     model: v.string(),
     rankedAt: v.optional(v.number()),
@@ -88,7 +87,7 @@ export const upsertResults = mutation({
     for (const ranking of merged.values()) {
       await ctx.db.insert('job_rankings', {
         postingId: ranking.postingId,
-        criteriaId: args.criteriaId,
+        evaluatorId: args.evaluatorId,
         scrapeRunId: args.scrapeRunId,
         rank: ranking.rank,
         scoreOverall: ranking.scoreOverall,

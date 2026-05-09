@@ -238,6 +238,19 @@ export class CdpChromeDriver implements ChromeDriver {
     throw new Error(`Timed out waiting for selector '${selector}'`);
   }
 
+  async getCookiesForUrls(
+    urls: string[]
+  ): Promise<Array<{ name: string; value: string; domain?: string; path?: string }>> {
+    const client = this.requireClient();
+    const response = await client.Network.getCookies({ urls });
+    return response.cookies.map((cookie) => ({
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+    }));
+  }
+
   private requireClient(): Client {
     if (!this.client) {
       throw new Error('Chrome CDP client is not connected');

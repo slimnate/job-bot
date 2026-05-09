@@ -20,7 +20,7 @@ type RankingResult = {
 };
 
 type LlmRequestPayload = {
-  criteria: Doc<'job_criteria'> | null;
+  evaluator: Doc<'job_evaluators'> | null;
   candidates: LlmRankingCandidate[];
   model: string;
   /** When set, overrides `LLM_RANKING_PROVIDER` for this call only. */
@@ -137,13 +137,13 @@ function strTrim(value: unknown): string {
 }
 
 function buildPrompt(payload: LlmRequestPayload): string {
-  const c = payload.criteria;
+  const c = payload.evaluator;
   const profileName = strTrim(c?.name);
   const rankingPrompt = strTrim(c?.rankingPrompt);
   const resumeMarkdown = strTrim(c?.resumeMarkdown);
 
   const sections: string[] = [
-    'Ranking criteria:',
+    'Evaluator context:',
     profileName.length > 0 ? `- Profile name: ${profileName}` : '- Profile name: (not provided)',
     rankingPrompt.length > 0 ? `- User ranking instructions: ${rankingPrompt}` : '- User ranking instructions: (not provided)',
     resumeMarkdown.length > 0 ? `- Resume markdown:\n${resumeMarkdown}` : '- Resume markdown: (not provided)',

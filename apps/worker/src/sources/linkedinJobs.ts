@@ -84,6 +84,7 @@ function parseLinkedInMaxPostingsFromEnv(env: NodeJS.ProcessEnv): number | undef
 
 type LoginPoll = {
   onLogin: boolean;
+  signedIn: boolean;
   hasShell: boolean;
   href: string;
   /** Why we are still waiting (for logs only). */
@@ -104,9 +105,10 @@ const LINKEDIN_SHELL_POLL_SCRIPT = `(() => {
   };
 
   const onLoginUrl =
-    /linkedin\\.com\\/(login|checkpoint|uas\\/login|authwall)/i.test(href) ||
+    /linkedin\\.com\\/(login|checkpoint|uas\\/login|authwall|signup|reg\\/join)/i.test(href) ||
     /\\/login\\/?$/i.test(path) ||
-    path.includes('/checkpoint/');
+    path.includes('/checkpoint/') ||
+    path.includes('/authwall');
 
   const pwd = document.querySelector(
     'input[type="password"][autocomplete="current-password"], input#session_password, input[name="session_password"]'
@@ -117,6 +119,18 @@ const LINKEDIN_SHELL_POLL_SCRIPT = `(() => {
       (visible(pwd) && user && visible(user)) ||
       (visible(pwd) && /login|checkpoint/i.test(path))
   );
+
+  const hasGuestSignIn = Boolean(
+    document.querySelector(
+      'a[href*="/login"], a[href*="/uas/login"], a[href*="/authwall"], a[data-tracking-control-name*="guest_homepage"], button[data-tracking-control-name*="guest_homepage"]'
+    )
+  );
+  const hasMemberNav = Boolean(
+    document.querySelector(
+      'a[href^="/feed/"], nav.global-nav, img.global-nav__me-photo, button[aria-label*="Me"], a[data-control-name*="nav.profile"]'
+    )
+  );
+  const signedIn = Boolean(!onLoginForm && hasMemberNav && !hasGuestSignIn);
 
   const hasResultsShell = Boolean(
     document.querySelector(
@@ -150,11 +164,12 @@ const LINKEDIN_SHELL_POLL_SCRIPT = `(() => {
   const hasShell = Boolean(hasResultsShell || hasJobsHub);
 
   let waitReason = 'ok';
-  if (onLoginForm) waitReason = 'login_or_checkpoint';
+  if (!signedIn) waitReason = 'not_signed_in';
   else if (!hasShell) waitReason = 'no_jobs_ui_match';
 
   return {
     onLogin: onLoginForm,
+    signedIn,
     hasShell,
     href,
     waitReason,
@@ -240,7 +255,7 @@ function buildLinkedInAutoLoginExpression(user: string, password: string): strin
 }
 
 /**
- * Waits until the jobs UI is usable or throws after `timeoutMs`.
+ * Waits until authenticated LinkedIn jobs UI is usable or throws after `timeoutMs`.
  * If `autoLogin` is set, performs **one** automatic submit when a login form is detected (then falls back to manual wait).
  */
 async function waitForLinkedInJobsShell(
@@ -254,7 +269,7 @@ async function waitForLinkedInJobsShell(
   while (Date.now() - start < timeoutMs) {
     const state = await driver.evaluate<LoginPoll>(LINKEDIN_SHELL_POLL_SCRIPT);
 
-    if (!state.onLogin && state.hasShell) {
+    if (state.signedIn && !state.onLogin && state.hasShell) {
       return;
     }
 
@@ -292,6 +307,7 @@ async function waitForLinkedInJobsShell(
       phase: 'polling',
       href: state.href,
       onLogin: state.onLogin,
+      signedIn: state.signedIn,
       hasShell: state.hasShell,
       waitReason: state.waitReason,
     });
@@ -299,7 +315,7 @@ async function waitForLinkedInJobsShell(
   }
 
   throw new Error(
-    'Timed out waiting for LinkedIn login / jobs shell. Sign in in the Chrome window and retry.'
+    'Timed out waiting for authenticated LinkedIn jobs UI. Sign in in the Chrome window and retry.'
   );
 }
 
@@ -347,6 +363,98 @@ const PREFERENCES_CLICK_SCRIPT = `(() => {
   return { error: 'SHOW_ALL_MISSING' };
 })()`;
 
+function buildLinkedInApplySearchUiExpression(search: string, location: string): string {
+  const searchJson = JSON.stringify(search);
+  const locationJson = JSON.stringify(location);
+  return `(() => {
+    const searchValue = ${searchJson};
+    const locationValue = ${locationJson};
+    const norm = (v) => (v || '').replace(/\\s+/g, ' ').trim();
+    const setInput = (input, value) => {
+      input.focus();
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      if (value) {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    };
+    const findFirst = (selectors) => {
+      for (const selector of selectors) {
+        const found = document.querySelector(selector);
+        if (found instanceof HTMLInputElement) {
+          return { input: found, selector };
+        }
+      }
+      return null;
+    };
+    const keywordSelectors = [
+      'input[aria-label*="Search by title"]',
+      'input[aria-label*="Search jobs"]',
+      'input[id*="jobs-search-box-keyword-id"]',
+      'input[name*="keywords"]'
+    ];
+    const locationSelectors = [
+      'input[aria-label*="City"]',
+      'input[aria-label*="location"]',
+      'input[id*="jobs-search-box-location-id"]',
+      'input[name*="location"]'
+    ];
+    const keyword = findFirst(keywordSelectors);
+    const location = findFirst(locationSelectors);
+    if (!keyword && searchValue) {
+      return { ok: false, reason: 'keyword_input_missing' };
+    }
+    if (!location && locationValue) {
+      return { ok: false, reason: 'location_input_missing' };
+    }
+    if (keyword) setInput(keyword.input, searchValue);
+    if (location) setInput(location.input, locationValue);
+
+    const submitCandidates = [
+      'button[aria-label*="Search"]',
+      '.jobs-search-box__submit-button',
+      'button[type="submit"]'
+    ];
+    let submitSelector = null;
+    let submitted = false;
+    for (const selector of submitCandidates) {
+      const node = document.querySelector(selector);
+      if (node instanceof HTMLElement) {
+        node.click();
+        submitSelector = selector;
+        submitted = true;
+        break;
+      }
+    }
+    if (!submitted && keyword) {
+      keyword.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      keyword.input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+      submitSelector = 'keyword_enter';
+      submitted = true;
+    }
+    if (!submitted) {
+      return { ok: false, reason: 'search_submit_missing' };
+    }
+    return {
+      ok: true,
+      keywordSelector: keyword ? keyword.selector : null,
+      locationSelector: location ? location.selector : null,
+      submitSelector
+    };
+  })()`;
+}
+
+type LinkedInUiSearchResult = {
+  ok: boolean;
+  reason?: string;
+  keywordSelector?: string | null;
+  locationSelector?: string | null;
+  submitSelector?: string | null;
+};
+
 type BundleJob = {
   externalId: string;
   url: string;
@@ -384,8 +492,7 @@ type BundleOutcome =
 
 export async function collectLinkedInPostings(params: {
   runId: Id<'scrape_runs'>;
-  linkedinSearchQuery?: string;
-  linkedinLocation?: string;
+  sourceCriteria?: Record<string, string>;
   driver: ChromeDriver;
   env: NodeJS.ProcessEnv;
   /** When set (worker orchestrator), each scraped job is pushed over CDP and upserted immediately. */
@@ -419,8 +526,8 @@ export async function collectLinkedInPostings(params: {
     });
   }
 
-  const queryRaw = params.linkedinSearchQuery?.trim() ?? '';
-  const locationRaw = params.linkedinLocation?.trim() ?? '';
+  const queryRaw = params.sourceCriteria?.search?.trim() ?? '';
+  const locationRaw = params.sourceCriteria?.location?.trim() ?? '';
   const useSearchPath = queryRaw.length > 0 || locationRaw.length > 0;
 
   const autoLogin = parseLinkedInAutoLoginFromEnv(params.env);
@@ -481,38 +588,60 @@ export async function collectLinkedInPostings(params: {
       workerLog.info('linkedin.stream_posting', { phase: 'binding_installed' });
     }
 
+    workerLog.info('linkedin.navigate', { path: 'jobs_hub', url: 'https://www.linkedin.com/jobs/' });
+    await params.driver.navigate('https://www.linkedin.com/jobs/', { timeoutMs: 60_000 });
+    await waitForLinkedInJobsShell(params.driver, 15 * 60 * 1000, autoLogin);
+
+    await injectOverlayIfNeeded();
+
+    let searchStrategyUsed: 'ui' | 'url_fallback' | 'preferences_hub' = 'preferences_hub';
+    let fallbackReason: string | null = null;
+
     if (useSearchPath) {
-      const searchParams = new URLSearchParams();
-      if (queryRaw.length > 0) {
-        searchParams.set('keywords', queryRaw);
-      }
-      if (locationRaw.length > 0) {
-        searchParams.set('location', locationRaw);
-      }
-      const searchUrl = `https://www.linkedin.com/jobs/search/?${searchParams.toString()}`;
-      workerLog.info('linkedin.navigate', {
-        path: 'search',
-        url: searchUrl,
-        hasKeywords: queryRaw.length > 0,
-        hasLocation: locationRaw.length > 0,
-      });
-      await params.driver.navigate(searchUrl, { timeoutMs: 60_000 });
-      await waitForLinkedInJobsShell(params.driver, 15 * 60 * 1000, autoLogin);
-      await injectOverlayIfNeeded();
-      if (debugMode !== 'none') {
-        workerLog.info('linkedin.debug_step', {
-          phase: 'after_navigation_search',
+      const uiResult = await params.driver.evaluate<LinkedInUiSearchResult>(
+        buildLinkedInApplySearchUiExpression(queryRaw, locationRaw)
+      );
+      if (uiResult.ok) {
+        searchStrategyUsed = 'ui';
+        workerLog.info('linkedin.search_ui', {
+          event: 'linkedin_search_ui_applied',
+          strategyUsed: searchStrategyUsed,
+          keywordSelector: uiResult.keywordSelector ?? null,
+          locationSelector: uiResult.locationSelector ?? null,
+          submitSelector: uiResult.submitSelector ?? null,
+          hasKeywords: queryRaw.length > 0,
+          hasLocation: locationRaw.length > 0,
         });
-        await linkedInWaitStep(params.driver, {
-          stepLabel: 'After navigation (search results shell)',
+        await sleep(2800);
+        await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
+      } else {
+        fallbackReason = uiResult.reason ?? 'ui_search_failed';
+        const searchParams = new URLSearchParams();
+        if (queryRaw.length > 0) {
+          searchParams.set('keywords', queryRaw);
+        }
+        if (locationRaw.length > 0) {
+          searchParams.set('location', locationRaw);
+        }
+        const searchUrl = `https://www.linkedin.com/jobs/search/?${searchParams.toString()}`;
+        searchStrategyUsed = 'url_fallback';
+        workerLog.warn('linkedin.search_fallback', {
+          event: 'linkedin_search_fallback_to_url',
+          strategyUsed: searchStrategyUsed,
+          reason: fallbackReason,
+          selectorAttemptSummary: {
+            keywordSelector: uiResult.keywordSelector ?? null,
+            locationSelector: uiResult.locationSelector ?? null,
+            submitSelector: uiResult.submitSelector ?? null,
+          },
+          url: searchUrl,
+          hasKeywords: queryRaw.length > 0,
+          hasLocation: locationRaw.length > 0,
         });
+        await params.driver.navigate(searchUrl, { timeoutMs: 60_000 });
+        await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
       }
     } else {
-      workerLog.info('linkedin.navigate', { path: 'preferences_hub', url: 'https://www.linkedin.com/jobs/' });
-      await params.driver.navigate('https://www.linkedin.com/jobs/', { timeoutMs: 60_000 });
-      await waitForLinkedInJobsShell(params.driver, 15 * 60 * 1000, autoLogin);
-
-      await injectOverlayIfNeeded();
       if (debugMode !== 'none') {
         workerLog.info('linkedin.debug_step', { phase: 'jobs_hub_before_show_all' });
         await linkedInWaitStep(params.driver, {
@@ -535,18 +664,22 @@ export async function collectLinkedInPostings(params: {
 
       await sleep(3200);
       await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
+    }
 
-      await injectOverlayIfNeeded();
-      if (debugMode !== 'none') {
-        workerLog.info('linkedin.debug_step', { phase: 'after_show_all' });
-        await linkedInWaitStep(params.driver, {
-          stepLabel: 'After “Show all” (preferences results list)',
-        });
-      }
+    await injectOverlayIfNeeded();
+    if (debugMode !== 'none') {
+      workerLog.info('linkedin.debug_step', { phase: 'after_search_navigation' });
+      await linkedInWaitStep(params.driver, {
+        stepLabel: 'After search navigation (results shell)',
+      });
     }
 
     await injectOverlayIfNeeded();
     workerLog.info('linkedin.scrape', {
+      event: 'linkedin_search_strategy',
+      strategyUsed: searchStrategyUsed,
+      usedLinkedinUrlFallback: searchStrategyUsed === 'url_fallback',
+      fallbackReason,
       maxPages: linkedInMaxPages,
       maxPostings: linkedInMaxPostings ?? null,
       WORKER_LINKEDIN_PAGES: params.env.WORKER_LINKEDIN_PAGES ?? null,
@@ -653,6 +786,11 @@ export async function collectLinkedInPostings(params: {
       stats: {
         discoveredCount: postings.length,
         dedupedCount: jobs.length - postings.length,
+      },
+      searchTelemetry: {
+        strategyUsed: searchStrategyUsed,
+        usedLinkedinUrlFallback: searchStrategyUsed === 'url_fallback',
+        fallbackReason: fallbackReason ?? undefined,
       },
     };
   } finally {

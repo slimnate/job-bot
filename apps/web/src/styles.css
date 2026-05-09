@@ -104,6 +104,110 @@ a {
   margin: 0.2rem 0 0;
 }
 
+.panel--scheduler-tight {
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.panel--scheduler-tight .panel-heading {
+  margin-bottom: 0.35rem;
+}
+
+.panel.panel--scheduler-tight h2 {
+  font-size: 1.05rem;
+}
+
+.scheduler-compact {
+  margin: 0;
+}
+
+.scheduler-compact__hint {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.scheduler-compact__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.45rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: #e5e7eb;
+}
+
+.scheduler-compact__row + .scheduler-compact__row {
+  margin-top: 0.2rem;
+}
+
+.scheduler-compact__row--muted {
+  color: #9ca3af;
+  font-size: 0.78rem;
+}
+
+.scheduler-compact__sep {
+  color: #4b5563;
+  user-select: none;
+  flex-shrink: 0;
+  font-weight: 300;
+}
+
+.scheduler-compact__label {
+  color: #9ca3af;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  margin-right: 0.1rem;
+}
+
+.scheduler-compact__time {
+  font-variant-numeric: tabular-nums;
+  color: #d1d5db;
+}
+
+.scheduler-compact__row--muted .scheduler-compact__time {
+  color: #cbd5e1;
+}
+
+.scheduler-compact__paren {
+  font-variant-numeric: tabular-nums;
+  color: #6b7280;
+}
+
+.scheduler-compact__live {
+  font-size: 0.78rem;
+  color: #86efac;
+  font-variant-numeric: tabular-nums;
+}
+
+.scheduler-compact__live--stale {
+  color: #fca5a5;
+}
+
+.scheduler-compact__error {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.dashboard-intro .dashboard-lede {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.scheduler-queue-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .dashboard-intro .dashboard-lede {
   margin: 0;
   color: #d1d5db;
@@ -140,7 +244,7 @@ a {
   color: #9ca3af;
 }
 
-/** Helper line under form labels (e.g. Criteria notes vs ranking prompt). */
+/** Helper line under form labels (e.g. evaluator notes vs ranking prompt). */
 .field-hint {
   display: block;
   margin-top: 0.1rem;
@@ -299,6 +403,98 @@ button.btn-success:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.evaluator-top-row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: nowrap;
+}
+
+.evaluator-inline-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.evaluator-inline-label {
+  color: #d1d5db;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+.evaluator-inline-field--name {
+  flex: 1 1 auto;
+}
+
+.evaluator-inline-field--name input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.evaluator-inline-field--active {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.evaluator-form-actions {
+  justify-content: flex-end;
+}
+
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #111827;
+  padding: 0.2rem 0.45rem 0.2rem 0.25rem;
+}
+
+.toggle-pill.active {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.16);
+}
+
+.toggle-pill-track {
+  width: 2.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: #374151;
+  position: relative;
+  display: inline-block;
+}
+
+.toggle-pill.active .toggle-pill-track {
+  background: #2563eb;
+}
+
+.toggle-pill-thumb {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: #f8fafc;
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  transition: transform 0.16s ease-in-out;
+}
+
+.toggle-pill.active .toggle-pill-thumb {
+  transform: translateX(1rem);
+}
+
+.toggle-pill-text {
+  min-width: 1.8rem;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #e5e7eb;
 }
 
 .posting-bulk-actions {
@@ -754,6 +950,31 @@ thead th {
   background: rgba(185, 28, 28, 0.16);
 }
 
+/* Scheduler timer badges — green when running, slate when stopped, red when stale, amber while a tick is in flight. */
+.scheduler-timer-on {
+  color: #86efac;
+  border-color: #15803d;
+  background: rgba(21, 128, 61, 0.16);
+}
+
+.scheduler-timer-off {
+  color: #cbd5e1;
+  border-color: #475569;
+  background: rgba(71, 85, 105, 0.22);
+}
+
+.scheduler-timer-stale {
+  color: #fca5a5;
+  border-color: #b91c1c;
+  background: rgba(185, 28, 28, 0.16);
+}
+
+.scheduler-tick-active {
+  color: #fde68a;
+  border-color: #ca8a04;
+  background: rgba(202, 138, 4, 0.15);
+}
+
 .log-level-info {
   color: #93c5fd;
   border-color: #1d4ed8;
@@ -938,6 +1159,23 @@ thead th {
 @media (max-width: 900px) {
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .evaluator-top-row {
+    flex-wrap: wrap;
+  }
+
+  .evaluator-inline-field {
+    width: 100%;
+  }
+
+  .evaluator-inline-field input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .evaluator-inline-field--active {
+    margin-left: 0;
   }
 
   .queue-add-row {

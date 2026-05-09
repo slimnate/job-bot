@@ -6,13 +6,18 @@ import { handleRankPostingRequest, handleRankPostingsRequest } from './workerRan
 
 const corsTrigger: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+const corsJson: Record<string, string> = {
+  ...corsTrigger,
+  'Content-Type': 'application/json; charset=utf-8',
+};
+
 /**
- * Local-only HTTP trigger: `POST /trigger` runs one scheduler tick; `POST /rank-posting` scores one posting
- * and `POST /rank-postings` scores multiple postings in one batch via Cursor CLI.
+ * Local-only HTTP trigger: `GET /scheduler` returns scheduler JSON; `POST /trigger` runs one scheduler tick;
+ * `POST /rank-posting` scores one posting and `POST /rank-postings` scores multiple postings in one batch via Cursor CLI.
  * Binds `127.0.0.1` only.
  */
 export function startWorkerTriggerServer(
@@ -23,10 +28,24 @@ export function startWorkerTriggerServer(
   const server = http.createServer((req, res) => {
     if (
       req.method === 'OPTIONS' &&
-      (req.url === '/trigger' || req.url === '/rank-posting' || req.url === '/rank-postings')
+      (req.url === '/trigger' ||
+        req.url === '/scheduler' ||
+        req.url === '/rank-posting' ||
+        req.url === '/rank-postings')
     ) {
       res.writeHead(204, corsTrigger);
       res.end();
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/scheduler') {
+      try {
+        const body = JSON.stringify(scheduler.getStatus());
+        res.writeHead(200, corsJson);
+        res.end(body);
+      } catch (err: unknown) {
+        res.writeHead(500, { ...corsTrigger, 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(err instanceof Error ? err.message : 'scheduler status failed');
+      }
       return;
     }
     if (req.method === 'POST' && req.url === '/trigger') {
@@ -57,7 +76,7 @@ export function startWorkerTriggerServer(
   server.listen(port, '127.0.0.1', () => {
     workerLog.info('worker.trigger_http', {
       port,
-      paths: ['/trigger', '/rank-posting', '/rank-postings'],
+      paths: ['/scheduler', '/trigger', '/rank-posting', '/rank-postings'],
       bind: '127.0.0.1',
     });
   });

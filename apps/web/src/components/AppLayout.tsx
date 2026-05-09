@@ -9,14 +9,17 @@ export function AppLayout() {
             Job Bot
           </NavLink>
           <nav className='app-navbar-links' aria-label='Main'>
-            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/criteria'>
-              Criteria
-            </NavLink>
             <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/postings'>
               Postings
             </NavLink>
+            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/sources'>
+              Sources
+            </NavLink>
             <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/workers'>
               Workers
+            </NavLink>
+            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/evaluators'>
+              Evaluators
             </NavLink>
           </nav>
         </div>

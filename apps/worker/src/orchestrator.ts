@@ -10,9 +10,10 @@ import { rankJobsWithLlm, type LlmRankingCandidate } from './ranking/rankJobsWit
 import { withRetry } from './retry.js';
 import { JOB_BOT_SCRAPE_ABORT_MESSAGE } from './sources/linkedinJobs.js';
 import { collectPostingsForSource } from './sourceAdapters.js';
+import { parseWorkerDefaultEvaluatorId } from './workerDefaultEvaluator.js';
 
 type TriggerRunInput = {
-  criteriaId?: Id<'job_criteria'>;
+  evaluatorId?: Id<'job_evaluators'>;
   source?: string;
 };
 
@@ -21,13 +22,8 @@ type QueuePayload = {
   source: string;
 };
 
-type LinkedInRunFields = {
-  linkedinSearchQuery?: string;
-  linkedinLocation?: string;
-};
-
 type RecomputeResponse = {
-  criteria: Doc<'job_criteria'> | null;
+  evaluator: Doc<'job_evaluators'> | null;
   model: string;
   candidates: Array<Doc<'job_postings'>>;
 };
@@ -87,7 +83,7 @@ export class WorkerOrchestrator {
   async triggerAndEnqueue(input: TriggerRunInput = {}): Promise<void> {
     const triggered = await this.runConvex('runs.trigger', () =>
       this.convex.mutation(api.runs.trigger, {
-        criteriaId: input.criteriaId,
+        evaluatorId: input.evaluatorId,
         source: input.source,
       })
     );
@@ -161,27 +157,8 @@ export class WorkerOrchestrator {
   }
 
   async enqueueScheduledRuns(): Promise<void> {
-    const activeCriteria = await withRetry(
-      () =>
-        this.convex.query(api.criteria.get, {
-          onlyActive: true,
-        }),
-      {
-        ...convexRetryOptions,
-        label: 'criteria.get',
-      }
-    );
-
-    if (!activeCriteria) {
-      await this.triggerAndEnqueue({ source: 'linkedin' });
-      return;
-    }
-
-    /** Criteria no longer lists scrape sources; scheduled runs default to LinkedIn only. */
-    await this.triggerAndEnqueue({
-      criteriaId: (activeCriteria as Doc<'job_criteria'>)._id,
-      source: 'linkedin',
-    });
+    /** Scheduled runs omit `evaluatorId`; each worker resolves ranking via `WORKER_DEFAULT_EVALUATOR_ID`. */
+    await this.triggerAndEnqueue({ source: 'linkedin' });
   }
 
   queueSnapshot(): { queued: number; running: number } {
@@ -245,8 +222,7 @@ export class WorkerOrchestrator {
             collectPostingsForSource({
               runId: payload.runId,
               source: payload.source,
-              linkedinSearchQuery: (runDoc as LinkedInRunFields).linkedinSearchQuery,
-              linkedinLocation: (runDoc as LinkedInRunFields).linkedinLocation,
+              sourceCriteria: runDoc.sourceCriteria,
               streamPosting: async (posting) => {
                 const row = await this.runConvex(`postings.upsertBatch.stream:${payload.runId}`, () =>
                   this.convex.mutation(api.postings.upsertBatch, {
@@ -303,13 +279,44 @@ export class WorkerOrchestrator {
 
         let rankedCount = 0;
         if (this.enableLlmRanking) {
+          const sourceDefaultEvaluatorId = await this.runConvex(
+            `sources.defaultEvaluator:${payload.source}`,
+            () =>
+              this.convex.query(api.sources.defaultEvaluatorForSource, {
+                source: payload.source,
+              })
+          );
+          const rankingEvaluatorId =
+            runDoc.evaluatorId ??
+            sourceDefaultEvaluatorId ??
+            parseWorkerDefaultEvaluatorId(process.env);
+          if (!rankingEvaluatorId) {
+            workerLog.warn('run.phase', {
+              phase: 'ranking_no_evaluator',
+              runId: payload.runId,
+              source: payload.source,
+              message:
+                'No evaluator on run, no source default, and WORKER_DEFAULT_EVALUATOR_ID unset; ranking runs with an empty evaluator profile.',
+            });
+          }
           const recompute = (await this.runConvex(`ranking.recompute:${payload.runId}`, () =>
             this.convex.mutation(api.ranking.recompute, {
-              criteriaId: runDoc.criteriaId,
+              evaluatorId: rankingEvaluatorId,
               source: payload.source,
               limit: 100,
             })
           )) as RecomputeResponse;
+
+          if (rankingEvaluatorId && !recompute.evaluator) {
+            workerLog.warn('run.phase', {
+              phase: 'ranking_evaluator_unresolved',
+              runId: payload.runId,
+              source: payload.source,
+              evaluatorId: rankingEvaluatorId,
+              message:
+                'Evaluator id did not resolve to an available profile (missing or Active off); ranking uses an empty evaluator profile.',
+            });
+          }
 
           const candidatesForRun = recompute.candidates.filter(
             (posting) => posting.scrapeRunId === payload.runId
@@ -323,7 +330,7 @@ export class WorkerOrchestrator {
           });
 
           const rankingResult = await rankJobsWithLlm({
-            criteria: recompute.criteria,
+            evaluator: recompute.evaluator,
             model: recompute.model,
             candidates: candidatesForRun as unknown as LlmRankingCandidate[],
           });
@@ -333,7 +340,7 @@ export class WorkerOrchestrator {
           if (rankings.length > 0) {
             const saveResult = await this.runConvex(`ranking.upsertResults:${payload.runId}`, () =>
               this.convex.mutation(api.ranking.upsertResults, {
-                criteriaId: recompute.criteria?._id,
+                evaluatorId: recompute.evaluator?._id,
                 scrapeRunId: payload.runId,
                 model: rankingResult.model,
                 rankings,
@@ -361,7 +368,9 @@ export class WorkerOrchestrator {
           this.convex.mutation(api.runs.updateStatus, {
             runId: payload.runId,
             status: 'succeeded',
-            logsSummary: `Completed source '${payload.source}' run`,
+            logsSummary: collected.searchTelemetry?.usedLinkedinUrlFallback
+              ? `Completed source '${payload.source}' run with warning: LinkedIn UI search fallback to URL was used.`
+              : `Completed source '${payload.source}' run`,
             stats: {
               discoveredCount: collected.stats.discoveredCount,
               dedupedCount: upsertResult.updated + collected.stats.dedupedCount,
@@ -369,6 +378,9 @@ export class WorkerOrchestrator {
               rankedCount,
               errorCount: 0,
             },
+            linkedinSearchStrategy: collected.searchTelemetry?.strategyUsed,
+            usedLinkedinUrlFallback: collected.searchTelemetry?.usedLinkedinUrlFallback,
+            linkedinFallbackReason: collected.searchTelemetry?.fallbackReason,
           })
         );
 

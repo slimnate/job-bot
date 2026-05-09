@@ -43,6 +43,24 @@ export function RunDetailPage() {
         <p>Run not found.</p>
       ) : (
         <div className='run-detail-meta'>
+          {(() => {
+            const withSearchTelemetry = run as typeof run & {
+              usedLinkedinUrlFallback?: boolean;
+              linkedinFallbackReason?: string;
+              linkedinSearchStrategy?: string;
+            };
+            if (!withSearchTelemetry.linkedinSearchStrategy && !withSearchTelemetry.usedLinkedinUrlFallback) {
+              return null;
+            }
+            return (
+              <p>
+                <span className='run-detail-label'>Search path</span>{' '}
+                {withSearchTelemetry.usedLinkedinUrlFallback
+                  ? `URL fallback used${withSearchTelemetry.linkedinFallbackReason ? ` (${withSearchTelemetry.linkedinFallbackReason})` : ''}`
+                  : withSearchTelemetry.linkedinSearchStrategy}
+              </p>
+            );
+          })()}
           <p>
             <span className='run-detail-label'>Status</span> {run.status}
           </p>

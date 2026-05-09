@@ -1,36 +1,45 @@
 import { useMutation, useQuery } from 'convex/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
 const formatDateTime = (timestamp: number): string => new Date(timestamp).toLocaleString();
 
-/** Known scrape sources for the queue UI (backend accepts any non-empty string). */
-const QUEUE_SOURCE_OPTIONS = ['linkedin', 'greenhouse', 'lever'] as const;
-
-function isLinkedInSource(source: string): boolean {
-  return source.trim().toLowerCase() === 'linkedin';
-}
-
 type QueuedRun = Doc<'scrape_runs'>;
-type QueuedRunLinkedInFields = QueuedRun & {
-  linkedinLocation?: string;
+
+type SourceRow = {
+  source: string;
+  displayName: string;
+  acceptedCriteriaFields: string[];
+  isEnabled: boolean;
+  defaultEvaluatorId?: Id<'job_evaluators'>;
 };
 
-export function ScrapeQueuePanel() {
-  const criteriaList = useQuery(api.criteria.list, { limit: 50 });
-  const queuedRuns = useQuery(api.runs.list, { status: 'queued', limit: 100 });
+type SourcePresetRow = Doc<'source_presets'>;
 
+export function ScrapeQueuePanel() {
+  const evaluatorList = useQuery(api.evaluators.list, { limit: 50 });
+  const sourceRows = (useQuery(api.sources.list) ?? []) as SourceRow[];
+  const queuedRuns = useQuery(api.runs.list, { status: 'queued', limit: 100 });
+  const enabledSources = useMemo(
+    () => sourceRows.filter((row) => row.isEnabled),
+    [sourceRows]
+  );
+
+  const [newSource, setNewSource] = useState('linkedin');
+  const sourcePresets = useQuery(
+    api.sourcePresets.listBySource,
+    newSource ? ({ source: newSource as 'linkedin' }) : 'skip'
+  ) as SourcePresetRow[] | undefined;
   const triggerRun = useMutation(api.runs.trigger);
   const bumpQueued = useMutation(api.runs.bumpQueued);
   const updateQueued = useMutation(api.runs.updateQueued);
   const updateStatus = useMutation(api.runs.updateStatus);
 
-  const [newSource, setNewSource] = useState('linkedin');
-  const [newLinkedinQuery, setNewLinkedinQuery] = useState('');
-  const [newLinkedinLocation, setNewLinkedinLocation] = useState('');
-  const [newCriteriaId, setNewCriteriaId] = useState('');
+  const [newEvaluatorId, setNewEvaluatorId] = useState('');
+  const [newPresetId, setNewPresetId] = useState('');
+  const [newSourceCriteria, setNewSourceCriteria] = useState<Record<string, string>>({});
   const [queueMessage, setQueueMessage] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [triggeringRunId, setTriggeringRunId] = useState<Id<'scrape_runs'> | null>(null);
@@ -41,18 +50,35 @@ export function ScrapeQueuePanel() {
 
   const [editingId, setEditingId] = useState<Id<'scrape_runs'> | null>(null);
   const [editSource, setEditSource] = useState('');
-  const [editLinkedinQuery, setEditLinkedinQuery] = useState('');
-  const [editLinkedinLocation, setEditLinkedinLocation] = useState('');
-  const [editCriteriaId, setEditCriteriaId] = useState('');
+  const [editSourceCriteria, setEditSourceCriteria] = useState<Record<string, string>>({});
+  const [editEvaluatorId, setEditEvaluatorId] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const criteriaNameById = useMemo(() => {
+  const activeEvaluators = useMemo(
+    () => (evaluatorList ?? []).filter((row) => row.isActive),
+    [evaluatorList]
+  );
+
+  const evaluatorNameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const row of criteriaList ?? []) {
+    for (const row of evaluatorList ?? []) {
       map.set(row._id, row.name);
     }
     return map;
-  }, [criteriaList]);
+  }, [evaluatorList]);
+
+  /**
+   * Queued rows may still reference a profile that was turned off later; the edit dropdown only lists available (Active) evaluators.
+   */
+  useEffect(() => {
+    if (!editingId || evaluatorList === undefined || editEvaluatorId === '') {
+      return;
+    }
+    const row = evaluatorList.find((r) => r._id === editEvaluatorId);
+    if (!row || !row.isActive) {
+      setEditEvaluatorId('');
+    }
+  }, [editingId, evaluatorList, editEvaluatorId]);
 
   const sortedQueued = useMemo(() => {
     if (!queuedRuns) {
@@ -61,28 +87,28 @@ export function ScrapeQueuePanel() {
     return [...queuedRuns].sort((a, b) => a.startedAt - b.startedAt);
   }, [queuedRuns]);
 
-  const editSourceOptions = useMemo(() => {
-    const base = new Set<string>(QUEUE_SOURCE_OPTIONS);
-    if (editSource.trim()) {
-      base.add(editSource.trim());
-    }
-    return Array.from(base).sort((a, b) => a.localeCompare(b));
-  }, [editSource]);
+  const sourceByKey = useMemo(() => new Map(sourceRows.map((row) => [row.source, row])), [sourceRows]);
+  const newSourceFields = sourceByKey.get(newSource)?.acceptedCriteriaFields ?? [];
+  const editSourceFields = sourceByKey.get(editSource)?.acceptedCriteriaFields ?? [];
 
   const resetEdit = () => {
     setEditingId(null);
     setEditSource('');
-    setEditLinkedinQuery('');
-    setEditLinkedinLocation('');
-    setEditCriteriaId('');
+    setEditSourceCriteria({});
+    setEditEvaluatorId('');
   };
 
   const startEdit = (run: QueuedRun) => {
     setEditingId(run._id);
     setEditSource(run.source.trim());
-    setEditLinkedinQuery(run.linkedinSearchQuery ?? '');
-    setEditLinkedinLocation((run as QueuedRunLinkedInFields).linkedinLocation ?? '');
-    setEditCriteriaId(run.criteriaId ?? '');
+    setEditSourceCriteria(run.sourceCriteria ?? {});
+    const eid = run.evaluatorId ?? '';
+    if (!eid || evaluatorList === undefined) {
+      setEditEvaluatorId(eid);
+      return;
+    }
+    const row = evaluatorList.find((r) => r._id === eid);
+    setEditEvaluatorId(row?.isActive ? eid : '');
   };
 
   const onAddToQueue = async () => {
@@ -95,26 +121,10 @@ export function ScrapeQueuePanel() {
     setIsAdding(true);
     setQueueMessage('');
     try {
-      const criteriaId =
-        newCriteriaId === '' ? undefined : (newCriteriaId as Id<'job_criteria'>);
-      const linkedinSearchQuery =
-        !isLinkedInSource(source)
-          ? undefined
-          : newLinkedinQuery.trim() === ''
-            ? undefined
-            : newLinkedinQuery.trim();
-      const linkedinLocation =
-        !isLinkedInSource(source)
-          ? undefined
-          : newLinkedinLocation.trim() === ''
-            ? undefined
-            : newLinkedinLocation.trim();
-
       const result = await triggerRun({
-        criteriaId,
+        evaluatorId: newEvaluatorId === '' ? undefined : (newEvaluatorId as Id<'job_evaluators'>),
         source,
-        linkedinSearchQuery,
-        linkedinLocation,
+        sourceCriteria: newSourceCriteria,
       });
       setQueueMessage(`Queued ${result.runIds.length} run(s).`);
     } catch (error) {
@@ -142,18 +152,8 @@ export function ScrapeQueuePanel() {
       await updateQueued({
         runId: editingId,
         source: trimmed,
-        criteriaId:
-          editCriteriaId === '' ? null : (editCriteriaId as Id<'job_criteria'>),
-        linkedinSearchQuery: !isLinkedInSource(trimmed)
-          ? null
-          : editLinkedinQuery.trim() === ''
-            ? null
-            : editLinkedinQuery.trim(),
-        linkedinLocation: !isLinkedInSource(trimmed)
-          ? null
-          : editLinkedinLocation.trim() === ''
-            ? null
-            : editLinkedinLocation.trim(),
+        evaluatorId: editEvaluatorId === '' ? null : (editEvaluatorId as Id<'job_evaluators'>),
+        sourceCriteria: editSourceCriteria,
       });
       resetEdit();
       setQueueMessage('Queue entry updated.');
@@ -226,7 +226,9 @@ export function ScrapeQueuePanel() {
       </div>
       <p className='panel-subtitle tight'>
         Queued runs are processed by the worker (pending runs not yet claimed appear here). Add a
-        source label per run, optionally tie it to criteria, or edit / cancel before execution.
+        source per run, configure source search criteria, optionally pick an <strong>available</strong> evaluator (Active on in Evaluators), or edit / cancel
+        before execution. If you leave evaluator unset, ranking uses this source&apos;s default (Sources page),
+        then <code>WORKER_DEFAULT_EVALUATOR_ID</code> on the worker.
       </p>
 
       {queueMessage ? <p className='status-text'>{queueMessage}</p> : null}
@@ -238,30 +240,32 @@ export function ScrapeQueuePanel() {
             <select
               value={newSource}
               onChange={(event) => {
-                const value = event.target.value;
-                setNewSource(value);
-                if (!isLinkedInSource(value)) {
-                  setNewLinkedinQuery('');
-                  setNewLinkedinLocation('');
+                const sourceKey = event.target.value;
+                setNewSource(sourceKey);
+                setNewPresetId('');
+                const fields = sourceByKey.get(sourceKey)?.acceptedCriteriaFields ?? [];
+                const next: Record<string, string> = {};
+                for (const field of fields) {
+                  next[field] = '';
                 }
+                setNewSourceCriteria(next);
               }}
               aria-label='Source for new queue entry'
             >
-              {QUEUE_SOURCE_OPTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {value}
+              {enabledSources.map((value) => (
+                <option key={value.source} value={value.source}>
+                  {value.displayName}
                 </option>
               ))}
             </select>
           </label>
           <label>
-            Criteria (optional)
-            <select value={newCriteriaId} onChange={(event) => setNewCriteriaId(event.target.value)}>
-              <option value=''>Use active criteria</option>
-              {(criteriaList ?? []).map((c) => (
+            Evaluator (optional)
+            <select value={newEvaluatorId} onChange={(event) => setNewEvaluatorId(event.target.value)}>
+              <option value=''>Source / worker default</option>
+              {activeEvaluators.map((c) => (
                 <option key={c._id} value={c._id}>
                   {c.name}
-                  {c.isActive ? ' (active)' : ''}
                 </option>
               ))}
             </select>
@@ -272,32 +276,46 @@ export function ScrapeQueuePanel() {
             </button>
           </div>
         </div>
-        {isLinkedInSource(newSource) ? (
-          <div className='queue-add-linkedin'>
-            <label>
-              LinkedIn search (optional)
+        <label>
+          Preset (optional)
+          <select
+            value={newPresetId}
+            onChange={(event) => {
+              const presetId = event.target.value;
+              setNewPresetId(presetId);
+              const preset = (sourcePresets ?? []).find((row) => row._id === presetId);
+              if (!preset) {
+                return;
+              }
+              const next: Record<string, string> = {};
+              for (const field of newSourceFields) {
+                next[field] = preset.sourceCriteria[field] ?? '';
+              }
+              setNewSourceCriteria(next);
+            }}
+          >
+            <option value=''>No preset</option>
+            {(sourcePresets ?? []).map((preset) => (
+              <option key={preset._id} value={preset._id}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className='queue-add-linkedin'>
+          {newSourceFields.map((field) => (
+            <label key={field}>
+              {field}
               <input
-                value={newLinkedinQuery}
-                onChange={(event) => setNewLinkedinQuery(event.target.value)}
-                placeholder='Keywords (optional)'
-                aria-label='LinkedIn search query'
+                value={newSourceCriteria[field] ?? ''}
+                onChange={(event) =>
+                  setNewSourceCriteria((prev) => ({ ...prev, [field]: event.target.value }))
+                }
+                placeholder={`Enter ${field}`}
               />
             </label>
-            <label>
-              LinkedIn location (optional)
-              <input
-                value={newLinkedinLocation}
-                onChange={(event) => setNewLinkedinLocation(event.target.value)}
-                placeholder='City, state, or region'
-                aria-label='LinkedIn search location'
-              />
-              <span className='panel-subtitle tight'>
-                Leave both fields empty to use <strong>Jobs based on your preferences</strong> (Show all). Enter
-                keywords and/or location for LinkedIn search results.
-              </span>
-            </label>
-          </div>
-        ) : null}
+          ))}
+        </div>
       </div>
 
       <div className='table-wrapper'>
@@ -305,9 +323,8 @@ export function ScrapeQueuePanel() {
           <thead>
             <tr>
               <th>Source</th>
-              <th>LinkedIn query</th>
-              <th>LinkedIn location</th>
-              <th>Criteria</th>
+              <th>Search criteria</th>
+              <th>Evaluator</th>
               <th>Queued at</th>
               <th>Actions</th>
             </tr>
@@ -315,68 +332,66 @@ export function ScrapeQueuePanel() {
           <tbody>
             {queuedRuns === undefined ? (
               <tr>
-                <td colSpan={6}>Loading queue…</td>
+                <td colSpan={5}>Loading queue…</td>
               </tr>
             ) : sortedQueued.length === 0 ? (
               <tr>
-                <td colSpan={6}>No queued runs. Add one above or use &quot;Trigger run&quot; below.</td>
+                <td colSpan={5}>No queued runs. Add one above or use &quot;Trigger run&quot; below.</td>
               </tr>
             ) : (
-              sortedQueued.map((run) =>
-                editingId === run._id ? (
+              sortedQueued.map((run) => {
+                const runEvaluator = evaluatorList?.find((r) => r._id === run.evaluatorId);
+                return editingId === run._id ? (
                   <tr key={run._id}>
                     <td>
                       <select
                         value={editSource}
                         onChange={(event) => {
-                          const value = event.target.value;
-                          setEditSource(value);
-                          if (!isLinkedInSource(value)) {
-                            setEditLinkedinQuery('');
-                            setEditLinkedinLocation('');
+                          const sourceKey = event.target.value;
+                          setEditSource(sourceKey);
+                          const fields = sourceByKey.get(sourceKey)?.acceptedCriteriaFields ?? [];
+                          const next: Record<string, string> = {};
+                          for (const field of fields) {
+                            next[field] = editSourceCriteria[field] ?? '';
                           }
+                          setEditSourceCriteria(next);
                         }}
                         aria-label='Edit source'
                       >
-                        {editSourceOptions.map((value) => (
-                          <option key={value} value={value}>
-                            {value}
+                        {enabledSources.map((value) => (
+                          <option key={value.source} value={value.source}>
+                            {value.displayName}
                           </option>
                         ))}
                       </select>
                     </td>
                     <td>
-                      {isLinkedInSource(editSource) ? (
-                        <input
-                          value={editLinkedinQuery}
-                          onChange={(event) => setEditLinkedinQuery(event.target.value)}
-                          aria-label='Edit LinkedIn search query'
-                          placeholder='Optional keywords'
-                        />
-                      ) : (
+                      {editSourceFields.length === 0 ? (
                         '—'
-                      )}
-                    </td>
-                    <td>
-                      {isLinkedInSource(editSource) ? (
-                        <input
-                          value={editLinkedinLocation}
-                          onChange={(event) => setEditLinkedinLocation(event.target.value)}
-                          aria-label='Edit LinkedIn search location'
-                          placeholder='Optional location'
-                        />
                       ) : (
-                        '—'
+                        <div className='queue-add-linkedin'>
+                          {editSourceFields.map((field) => (
+                            <input
+                              key={field}
+                              value={editSourceCriteria[field] ?? ''}
+                              onChange={(event) =>
+                                setEditSourceCriteria((prev) => ({ ...prev, [field]: event.target.value }))
+                              }
+                              aria-label={`Edit ${field}`}
+                              placeholder={field}
+                            />
+                          ))}
+                        </div>
                       )}
                     </td>
                     <td>
                       <select
-                        value={editCriteriaId}
-                        onChange={(event) => setEditCriteriaId(event.target.value)}
-                        aria-label='Edit criteria'
+                        value={editEvaluatorId}
+                        onChange={(event) => setEditEvaluatorId(event.target.value)}
+                        aria-label='Edit evaluator'
                       >
-                        <option value=''>None (use active at run time)</option>
-                        {(criteriaList ?? []).map((c) => (
+                        <option value=''>Source / worker default</option>
+                        {activeEvaluators.map((c) => (
                           <option key={c._id} value={c._id}>
                             {c.name}
                           </option>
@@ -400,12 +415,24 @@ export function ScrapeQueuePanel() {
                 ) : (
                   <tr key={run._id}>
                     <td>{run.source}</td>
-                    <td>{run.linkedinSearchQuery ?? '—'}</td>
-                    <td>{(run as QueuedRunLinkedInFields).linkedinLocation ?? '—'}</td>
                     <td>
-                      {run.criteriaId
-                        ? (criteriaNameById.get(run.criteriaId) ?? run.criteriaId)
-                        : '—'}
+                      {Object.entries(run.sourceCriteria ?? {}).length === 0
+                        ? '—'
+                        : Object.entries(run.sourceCriteria ?? {})
+                            .map(([key, value]) => `${key}: ${value}`)
+                            .join(' | ')}
+                    </td>
+                    <td>
+                      {run.evaluatorId ? (
+                        <>
+                          {evaluatorNameById.get(run.evaluatorId) ?? run.evaluatorId}
+                          {runEvaluator && !runEvaluator.isActive ? (
+                            <span className='panel-subtitle tight'> (unavailable)</span>
+                          ) : null}
+                        </>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td>{formatDateTime(run.createdAt)}</td>
                     <td className='queue-actions-cell'>
@@ -424,8 +451,8 @@ export function ScrapeQueuePanel() {
                       </button>
                     </td>
                   </tr>
-                )
-              )
+                );
+              })
             )}
           </tbody>
         </table>

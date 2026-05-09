@@ -54,14 +54,14 @@ function strTrim(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function buildRankingPrompt(criteria: Doc<'job_criteria'> | null, candidates: LlmCandidate[]): string {
-  const c = criteria;
+function buildRankingPrompt(evaluator: Doc<'job_evaluators'> | null, candidates: LlmCandidate[]): string {
+  const c = evaluator;
   const profileName = strTrim(c?.name);
   const rankingPrompt = strTrim(c?.rankingPrompt);
   const resumeMarkdown = strTrim(c?.resumeMarkdown);
 
   const sections: string[] = [
-    'Ranking criteria:',
+    'Evaluator context:',
     profileName.length > 0 ? `- Profile name: ${profileName}` : '- Profile name: (not provided)',
     rankingPrompt.length > 0 ? `- User ranking instructions: ${rankingPrompt}` : '- User ranking instructions: (not provided)',
     resumeMarkdown.length > 0 ? `- Resume markdown:\n${resumeMarkdown}` : '- Resume markdown: (not provided)',
@@ -197,36 +197,36 @@ async function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Loads posting and criteria documents for the dashboard “score one posting” action.
+ * Loads posting and evaluator documents for the dashboard “score one posting” action.
  * Internal so resume and ranking prompt are not exposed through a public query.
  */
 export const loadScoreContext = internalQuery({
   args: {
     postingId: v.id('job_postings'),
-    criteriaId: v.id('job_criteria'),
+    evaluatorId: v.id('job_evaluators'),
   },
   handler: async (ctx, args) => {
     const posting = await ctx.db.get(args.postingId);
-    const criteria = await ctx.db.get(args.criteriaId);
-    if (!posting || !criteria) {
+    const evaluator = await ctx.db.get(args.evaluatorId);
+    if (!posting || !evaluator) {
       return null;
     }
-    return { posting, criteria };
+    return { posting, evaluator };
   },
 });
 
 /**
- * Loads a criteria profile and a deduped list of postings for batched scoring.
- * Returns null when criteria is missing or no postings exist after filtering.
+ * Loads an evaluator profile and a deduped list of postings for batched scoring.
+ * Returns null when evaluator is missing or no postings exist after filtering.
  */
 export const loadBatchScoreContext = internalQuery({
   args: {
     postingIds: v.array(v.id('job_postings')),
-    criteriaId: v.id('job_criteria'),
+    evaluatorId: v.id('job_evaluators'),
   },
   handler: async (ctx, args) => {
-    const criteria = await ctx.db.get(args.criteriaId);
-    if (!criteria) {
+    const evaluator = await ctx.db.get(args.evaluatorId);
+    if (!evaluator) {
       return null;
     }
 
@@ -243,7 +243,7 @@ export const loadBatchScoreContext = internalQuery({
       return null;
     }
 
-    return { postings, criteria };
+    return { postings, evaluator };
   },
 });
 
@@ -263,18 +263,18 @@ export type ScorePostingsBatchResult =
 export const scoreOnePosting = action({
   args: {
     postingId: v.id('job_postings'),
-    criteriaId: v.id('job_criteria'),
+    evaluatorId: v.id('job_evaluators'),
     /** OpenAI (or compatible) model id, e.g. `gpt-4.1-mini`. */
     apiModelId: v.string(),
   },
   handler: async (ctx, args): Promise<ScoreOnePostingResult> => {
     const context = await ctx.runQuery(internal.rankingScorePosting.loadScoreContext, {
       postingId: args.postingId,
-      criteriaId: args.criteriaId,
+      evaluatorId: args.evaluatorId,
     });
 
     if (!context) {
-      return { kind: 'error', message: 'Posting or criteria profile was not found.' };
+      return { kind: 'error', message: 'Posting or evaluator profile was not found.' };
     }
 
     const apiKey = readEnv('OPENAI_API_KEY')?.trim();
@@ -305,7 +305,7 @@ export const scoreOnePosting = action({
       },
     ];
 
-    const userContent = buildRankingPrompt(context.criteria, candidates);
+    const userContent = buildRankingPrompt(context.evaluator, candidates);
 
     let normalized: RankingResult[] | null = null;
 
@@ -400,7 +400,7 @@ export const scoreOnePosting = action({
     const row = normalized[0]!;
 
     await ctx.runMutation(api.ranking.upsertResults, {
-      criteriaId: args.criteriaId,
+      evaluatorId: args.evaluatorId,
       model: resolvedModel,
       rankings: [
         {
@@ -420,12 +420,12 @@ export const scoreOnePosting = action({
 
 /**
  * Scores multiple postings in one LLM request and saves one ranking row per posting.
- * This minimizes token usage by sharing one prompt context (criteria + resume) across all postings.
+ * This minimizes token usage by sharing one prompt context (evaluator + resume) across all postings.
  */
 export const scorePostingsBatch = action({
   args: {
     postingIds: v.array(v.id('job_postings')),
-    criteriaId: v.id('job_criteria'),
+    evaluatorId: v.id('job_evaluators'),
     /** OpenAI (or compatible) model id, e.g. `gpt-4.1-mini`. */
     apiModelId: v.string(),
   },
@@ -437,10 +437,10 @@ export const scorePostingsBatch = action({
 
     const context = await ctx.runQuery(internal.rankingScorePosting.loadBatchScoreContext, {
       postingIds,
-      criteriaId: args.criteriaId,
+      evaluatorId: args.evaluatorId,
     });
     if (!context) {
-      return { kind: 'error', message: 'Criteria profile or selected postings were not found.' };
+      return { kind: 'error', message: 'Evaluator profile or selected postings were not found.' };
     }
 
     const apiKey = readEnv('OPENAI_API_KEY')?.trim();
@@ -469,7 +469,7 @@ export const scorePostingsBatch = action({
       source: posting.source,
     }));
 
-    const userContent = buildRankingPrompt(context.criteria, candidates);
+    const userContent = buildRankingPrompt(context.evaluator, candidates);
     let normalized: RankingResult[] | null = null;
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -562,7 +562,7 @@ export const scorePostingsBatch = action({
     }
 
     await ctx.runMutation(api.ranking.upsertResults, {
-      criteriaId: args.criteriaId,
+      evaluatorId: args.evaluatorId,
       model: resolvedModel,
       rankings: normalized.map((row) => ({
         postingId: row.postingId as Doc<'job_postings'>['_id'],

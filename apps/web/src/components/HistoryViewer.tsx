@@ -5,8 +5,10 @@ import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 import { formatHumanizedTime } from '../lib/time';
 import { ScrapeQueuePanel } from './ScrapeQueuePanel';
+import { WorkerSchedulerPanel } from './WorkerSchedulerPanel';
 
 type RunStatus = '' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+type SearchPathFilter = '' | 'ui' | 'url_fallback' | 'preferences_hub';
 
 const formatRunDuration = (startedAt: number, endedAt?: number): string => {
   if (!endedAt || endedAt <= startedAt) {
@@ -121,7 +123,6 @@ const logMessageCell = (line: ParsedLogLine): string => {
 };
 
 export function HistoryViewer() {
-  const criteria = useQuery(api.criteria.get, { onlyActive: true });
   const triggerRun = useMutation(api.runs.trigger);
   const updateStatus = useMutation(api.runs.updateStatus);
   const requestGracefulStop = useMutation(api.runs.requestGracefulStop);
@@ -130,6 +131,7 @@ export function HistoryViewer() {
 
   const [runSourceFilter, setRunSourceFilter] = useState('');
   const [runStatusFilter, setRunStatusFilter] = useState<RunStatus>('');
+  const [runSearchPathFilter, setRunSearchPathFilter] = useState<SearchPathFilter>('');
   const [triggerMessage, setTriggerMessage] = useState('');
   const [isTriggeringRun, setIsTriggeringRun] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<Id<'scrape_runs'> | null>(null);
@@ -159,13 +161,26 @@ export function HistoryViewer() {
     [selectedLogs]
   );
 
+  const visibleRuns = useMemo(() => {
+    if (!runs) {
+      return [];
+    }
+    if (!runSearchPathFilter) {
+      return runs;
+    }
+    return runs.filter((run) => {
+      const withSearchTelemetry = run as Doc<'scrape_runs'> & {
+        linkedinSearchStrategy?: string;
+      };
+      return withSearchTelemetry.linkedinSearchStrategy === runSearchPathFilter;
+    });
+  }, [runs, runSearchPathFilter]);
+
   const onTriggerRun = async () => {
     setIsTriggeringRun(true);
     setTriggerMessage('');
     try {
-      const result = await triggerRun({
-        criteriaId: criteria?._id,
-      });
+      const result = await triggerRun({});
       setTriggerMessage(`Queued ${result.runIds.length} run(s).`);
     } catch (error) {
       setTriggerMessage(
@@ -261,8 +276,26 @@ export function HistoryViewer() {
     }
   };
 
+  const linkedinSearchBadge = (run: Doc<'scrape_runs'>): string => {
+    const withSearchTelemetry = run as Doc<'scrape_runs'> & {
+      usedLinkedinUrlFallback?: boolean;
+      linkedinSearchStrategy?: string;
+    };
+    if (withSearchTelemetry.usedLinkedinUrlFallback) {
+      return 'URL fallback used';
+    }
+    if (withSearchTelemetry.linkedinSearchStrategy === 'ui') {
+      return 'UI search';
+    }
+    if (withSearchTelemetry.linkedinSearchStrategy === 'preferences_hub') {
+      return 'Preferences hub';
+    }
+    return '-';
+  };
+
   return (
     <>
+      <WorkerSchedulerPanel />
       <ScrapeQueuePanel />
       <section className='panel'>
         <div className='panel-heading'>
@@ -299,6 +332,15 @@ export function HistoryViewer() {
             <option value='failed'>Failed</option>
             <option value='cancelled'>Cancelled</option>
           </select>
+          <select
+            value={runSearchPathFilter}
+            onChange={(event) => setRunSearchPathFilter(event.target.value as SearchPathFilter)}
+          >
+            <option value=''>All search paths</option>
+            <option value='ui'>UI search</option>
+            <option value='url_fallback'>URL fallback</option>
+            <option value='preferences_hub'>Preferences hub</option>
+          </select>
         </div>
         <div className='table-wrapper'>
           <table>
@@ -306,6 +348,7 @@ export function HistoryViewer() {
               <tr>
                 <th>Status</th>
                 <th>Source</th>
+                <th>Search path</th>
                 <th className='timestamp-cell'>Started</th>
                 <th className='timestamp-cell'>Ended</th>
                 <th>Duration</th>
@@ -315,13 +358,20 @@ export function HistoryViewer() {
               </tr>
             </thead>
             <tbody>
-              {runs?.length ? (
-                runs.map((run) => (
+              {visibleRuns.length ? (
+                visibleRuns.map((run) => (
                   <tr key={run._id}>
                     <td>
                       <span className={`status-badge status-${run.status}`}>{run.status}</span>
                     </td>
                     <td>{run.source}</td>
+                    <td>
+                      {linkedinSearchBadge(run) === 'URL fallback used' ? (
+                        <span className='status-badge status-running'>{linkedinSearchBadge(run)}</span>
+                      ) : (
+                        linkedinSearchBadge(run)
+                      )}
+                    </td>
                     <td className='timestamp-cell'>{formatHumanizedTime(run.startedAt)}</td>
                     <td className='timestamp-cell'>{formatHumanizedTime(run.endedAt)}</td>
                     <td>{formatRunDuration(run.startedAt, run.endedAt)}</td>
@@ -358,7 +408,7 @@ export function HistoryViewer() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8}>No runs recorded yet.</td>
+                  <td colSpan={9}>No runs recorded yet.</td>
                 </tr>
               )}
             </tbody>

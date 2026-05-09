@@ -24,7 +24,7 @@ function workerTriggerBaseUrl(): string {
 
 export function PostingViewer() {
   const totalPostings = useQuery(api.postings.count);
-  const criteriaProfiles = useQuery(api.criteria.list, { limit: 50 });
+  const evaluatorProfiles = useQuery(api.evaluators.list, { limit: 50 });
   const llmCatalog = useQuery(api.rankingLlmCatalog.listForUi) as LlmCatalogProvider[] | undefined;
   const deletePosting = useMutation(api.postings.deleteOne);
   const clearAllPostings = useMutation(api.postings.clearAll);
@@ -39,7 +39,7 @@ export function PostingViewer() {
   const [isClearing, setIsClearing] = useState(false);
   const [selectedPostingIds, setSelectedPostingIds] = useState<Set<string>>(new Set());
   const [scoreTargets, setScoreTargets] = useState<PostingTableRow[]>([]);
-  const [scoreCriteriaId, setScoreCriteriaId] = useState<Id<'job_criteria'> | ''>('');
+  const [scoreEvaluatorId, setScoreEvaluatorId] = useState<Id<'job_evaluators'> | ''>('');
   const [scoreProviderKey, setScoreProviderKey] = useState('');
   const [scoreApiModelId, setScoreApiModelId] = useState('');
   const [scoreBusy, setScoreBusy] = useState(false);
@@ -66,17 +66,16 @@ export function PostingViewer() {
   );
 
   useEffect(() => {
-    if (!scoreTargets.length || !criteriaProfiles?.length) {
+    if (!scoreTargets.length || !evaluatorProfiles?.length) {
       return;
     }
-    setScoreCriteriaId((prev) => {
-      if (prev && criteriaProfiles.some((c) => c._id === prev)) {
+    setScoreEvaluatorId((prev) => {
+      if (prev && evaluatorProfiles.some((c) => c._id === prev)) {
         return prev;
       }
-      const active = criteriaProfiles.find((c) => c.isActive);
-      return (active ?? criteriaProfiles[0])!._id;
+      return evaluatorProfiles[0]!._id;
     });
-  }, [scoreTargets, criteriaProfiles]);
+  }, [scoreTargets, evaluatorProfiles]);
 
   useEffect(() => {
     if (!scoreTargets.length || !llmCatalog?.length) {
@@ -127,8 +126,8 @@ export function PostingViewer() {
   };
 
   const onSubmitScore = async () => {
-    if (!scoreTargets.length || !scoreCriteriaId) {
-      setScoreDialogError('Pick a criteria profile.');
+    if (!scoreTargets.length || !scoreEvaluatorId) {
+      setScoreDialogError('Pick an evaluator profile.');
       return;
     }
     if (!selectedProvider || !scoreApiModelId) {
@@ -143,7 +142,7 @@ export function PostingViewer() {
         if (scoreTargets.length === 1) {
           const one = await scoreOnePosting({
             postingId: scoreTargets[0]!._id,
-            criteriaId: scoreCriteriaId,
+            evaluatorId: scoreEvaluatorId,
             apiModelId: scoreApiModelId,
           });
           if (one.kind === 'error') {
@@ -154,7 +153,7 @@ export function PostingViewer() {
         } else {
           const batch = await scorePostingsBatch({
             postingIds: scoreTargets.map((posting) => posting._id),
-            criteriaId: scoreCriteriaId,
+            evaluatorId: scoreEvaluatorId,
             apiModelId: scoreApiModelId,
           });
           if (batch.kind === 'error') {
@@ -171,7 +170,7 @@ export function PostingViewer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               postingId: scoreTargets[0]!._id,
-              criteriaId: scoreCriteriaId,
+              evaluatorId: scoreEvaluatorId,
               model: scoreApiModelId,
             }),
           });
@@ -187,7 +186,7 @@ export function PostingViewer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               postingIds: scoreTargets.map((posting) => posting._id),
-              criteriaId: scoreCriteriaId,
+              evaluatorId: scoreEvaluatorId,
               model: scoreApiModelId,
             }),
           });
@@ -311,7 +310,7 @@ export function PostingViewer() {
 
   const catalogEmpty = llmCatalog !== undefined && llmCatalog.length === 0;
   const canRunScore =
-    Boolean(scoreCriteriaId) &&
+    Boolean(scoreEvaluatorId) &&
     Boolean(selectedProvider?.models.length) &&
     Boolean(scoreApiModelId) &&
     !catalogEmpty;
@@ -423,26 +422,26 @@ export function PostingViewer() {
                     {scoreTargets[0]!.company}
                   </>
                 ) : (
-                  <strong>Selected postings will be scored one by one with the same criteria/provider/model.</strong>
+                    <strong>Selected postings will be scored one by one with the same evaluator/provider/model.</strong>
                 )}
               </p>
               <label className='stacked-field' htmlFor='score-criteria-select'>
-                Criteria profile
+                Evaluator profile
               </label>
               <select
                 id='score-criteria-select'
                 className='score-criteria-select'
-                value={scoreCriteriaId}
-                onChange={(event) => setScoreCriteriaId(event.target.value as Id<'job_criteria'>)}
-                disabled={scoreBusy || !criteriaProfiles?.length}
+                value={scoreEvaluatorId}
+                onChange={(event) => setScoreEvaluatorId(event.target.value as Id<'job_evaluators'>)}
+                disabled={scoreBusy || !evaluatorProfiles?.length}
               >
-                {!criteriaProfiles?.length ? (
-                  <option value=''>No profiles yet — create one under Criteria</option>
+                {!evaluatorProfiles?.length ? (
+                  <option value=''>No profiles yet — create one under Evaluators</option>
                 ) : (
-                  criteriaProfiles.map((c) => (
+                  evaluatorProfiles.map((c) => (
                     <option key={c._id} value={c._id}>
                       {c.name}
-                      {c.isActive ? ' (active)' : ''}
+                      {c.isActive ? ' (available)' : ''}
                     </option>
                   ))
                 )}
@@ -504,7 +503,7 @@ export function PostingViewer() {
                   type='button'
                   className='btn-primary'
                   onClick={() => void onSubmitScore()}
-                  disabled={scoreBusy || !criteriaProfiles?.length || !scoreCriteriaId || !canRunScore}
+                  disabled={scoreBusy || !evaluatorProfiles?.length || !scoreEvaluatorId || !canRunScore}
                 >
                   {scoreBusy ? 'Scoring…' : 'Run score'}
                 </button>

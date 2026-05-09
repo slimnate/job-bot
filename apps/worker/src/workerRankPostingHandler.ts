@@ -37,7 +37,7 @@ function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 type RankPostingBody = {
   postingId?: string;
   postingIds?: string[];
-  criteriaId?: string;
+  evaluatorId?: string;
   model?: string;
 };
 
@@ -48,7 +48,7 @@ const convexRetryOptions = {
 } as const;
 
 /**
- * Handles `POST /rank-posting`: loads posting + criteria from Convex, runs Cursor CLI ranking for one job,
+ * Handles `POST /rank-posting`: loads posting + evaluator from Convex, runs Cursor CLI ranking for one job,
  * writes `job_rankings`.
  */
 export async function handleRankPostingRequest(params: {
@@ -81,12 +81,12 @@ export async function handleRankPostingRequest(params: {
 
   const body = (parsed ?? {}) as RankPostingBody;
   const postingId = body.postingId;
-  const criteriaId = body.criteriaId;
+  const evaluatorId = body.evaluatorId;
   const model = typeof body.model === 'string' ? body.model.trim() : '';
 
-  if (!postingId || !criteriaId || !model) {
+  if (!postingId || !evaluatorId || !model) {
     res.writeHead(400, { ...corsJson, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: 'Missing postingId, criteriaId, or model' }));
+    res.end(JSON.stringify({ ok: false, error: 'Missing postingId, evaluatorId, or model' }));
     return;
   }
 
@@ -109,12 +109,12 @@ export async function handleRankPostingRequest(params: {
       return;
     }
 
-    const criteria = await runConvex('criteria.getById', () =>
-      convex.query(api.criteria.getById, { id: criteriaId as Id<'job_criteria'> })
+    const evaluator = await runConvex('evaluators.getById', () =>
+      convex.query(api.evaluators.getById, { id: evaluatorId as Id<'job_evaluators'> })
     );
-    if (!criteria) {
+    if (!evaluator) {
       res.writeHead(404, { ...corsJson, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'Criteria profile not found' }));
+      res.end(JSON.stringify({ ok: false, error: 'Evaluator profile not found' }));
       return;
     }
 
@@ -134,12 +134,12 @@ export async function handleRankPostingRequest(params: {
 
     workerLog.info('rank_posting.start', {
       postingId,
-      criteriaId,
+      evaluatorId,
       model,
     });
 
     const rankingResult = await rankJobsWithCursor({
-      criteria: criteria as Doc<'job_criteria'>,
+      evaluator: evaluator as Doc<'job_evaluators'>,
       model,
       candidates,
     });
@@ -153,7 +153,7 @@ export async function handleRankPostingRequest(params: {
 
     await runConvex('ranking.upsertResults', () =>
       convex.mutation(api.ranking.upsertResults, {
-        criteriaId: criteriaId as Id<'job_criteria'>,
+        evaluatorId: evaluatorId as Id<'job_evaluators'>,
         model: rankingResult.model,
         rankings,
       })
@@ -177,7 +177,7 @@ export async function handleRankPostingRequest(params: {
 }
 
 /**
- * Handles `POST /rank-postings`: loads selected postings + criteria, runs one Cursor CLI ranking call
+ * Handles `POST /rank-postings`: loads selected postings + evaluator, runs one Cursor CLI ranking call
  * for the full batch, writes one ranking row per posting.
  */
 export async function handleRankPostingsRequest(params: {
@@ -213,12 +213,12 @@ export async function handleRankPostingsRequest(params: {
   const postingIds = Array.from(
     new Set(postingIdsRaw.filter((value): value is string => typeof value === 'string' && value.length > 0))
   );
-  const criteriaId = body.criteriaId;
+  const evaluatorId = body.evaluatorId;
   const model = typeof body.model === 'string' ? body.model.trim() : '';
 
-  if (!postingIds.length || !criteriaId || !model) {
+  if (!postingIds.length || !evaluatorId || !model) {
     res.writeHead(400, { ...corsJson, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: 'Missing postingIds, criteriaId, or model' }));
+    res.end(JSON.stringify({ ok: false, error: 'Missing postingIds, evaluatorId, or model' }));
     return;
   }
 
@@ -232,12 +232,12 @@ export async function handleRankPostingsRequest(params: {
   }
 
   try {
-    const criteria = await runConvex('criteria.getById', () =>
-      convex.query(api.criteria.getById, { id: criteriaId as Id<'job_criteria'> })
+    const evaluator = await runConvex('evaluators.getById', () =>
+      convex.query(api.evaluators.getById, { id: evaluatorId as Id<'job_evaluators'> })
     );
-    if (!criteria) {
+    if (!evaluator) {
       res.writeHead(404, { ...corsJson, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: 'Criteria profile not found' }));
+      res.end(JSON.stringify({ ok: false, error: 'Evaluator profile not found' }));
       return;
     }
 
@@ -269,12 +269,12 @@ export async function handleRankPostingsRequest(params: {
 
     workerLog.info('rank_postings.start', {
       postingCount: candidates.length,
-      criteriaId,
+      evaluatorId,
       model,
     });
 
     const rankingResult = await rankJobsWithCursor({
-      criteria: criteria as Doc<'job_criteria'>,
+      evaluator: evaluator as Doc<'job_evaluators'>,
       model,
       candidates,
     });
@@ -288,7 +288,7 @@ export async function handleRankPostingsRequest(params: {
 
     await runConvex('ranking.upsertResults', () =>
       convex.mutation(api.ranking.upsertResults, {
-        criteriaId: criteriaId as Id<'job_criteria'>,
+        evaluatorId: evaluatorId as Id<'job_evaluators'>,
         model: rankingResult.model,
         rankings,
       })

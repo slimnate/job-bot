@@ -54,6 +54,11 @@ export interface ChromeDriver {
   scroll(deltaY: number): Promise<void>;
   waitForSelector(selector: string, timeoutMs?: number): Promise<void>;
   /**
+   * Reads cookies visible to the browser for the provided URLs.
+   * Useful for auth-state checks before starting scrape work.
+   */
+  getCookiesForUrls?(urls: string[]): Promise<Array<{ name: string; value: string; domain?: string; path?: string }>>;
+  /**
    * CDP `Runtime.addBinding` (optional; implemented by `CdpChromeDriver`).
    * The page calls `window[bindingName](jsonString)`.
    */

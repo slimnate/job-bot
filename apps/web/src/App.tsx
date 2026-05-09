@@ -1,9 +1,10 @@
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 
 import { AppLayout } from './components/AppLayout';
-import { CriteriaEditor } from './components/CriteriaEditor';
+import { EvaluatorsEditor } from './components/EvaluatorsEditor';
 import { HistoryViewer } from './components/HistoryViewer';
 import { PostingViewer } from './components/PostingViewer';
+import { SourcesManager } from './components/SourcesManager';
 import { DashboardHome } from './pages/DashboardHome';
 import { RunDetailPage } from './pages/RunDetailPage';
 
@@ -17,7 +18,9 @@ export function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<DashboardHome />} />
-        <Route path='criteria' element={<CriteriaEditor />} />
+        <Route path='evaluators' element={<EvaluatorsEditor />} />
+        <Route path='criteria' element={<Navigate to='/evaluators' replace />} />
+        <Route path='sources' element={<SourcesManager />} />
         <Route path='postings' element={<PostingViewer />} />
         <Route path='workers' element={<HistoryViewer />} />
         <Route path='workers/runs/:runId' element={<RunDetailPage />} />

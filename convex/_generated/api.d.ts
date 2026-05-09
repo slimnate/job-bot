@@ -8,13 +8,17 @@
  * @module
  */
 
-import type * as criteria from "../criteria.js";
+import type * as evaluators from "../evaluators.js";
 import type * as postings from "../postings.js";
 import type * as ranking from "../ranking.js";
 import type * as rankingLlmCatalog from "../rankingLlmCatalog.js";
 import type * as rankingScorePosting from "../rankingScorePosting.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runs from "../runs.js";
+import type * as sourceContract from "../sourceContract.js";
+import type * as sourcePresets from "../sourcePresets.js";
+import type * as sources from "../sources.js";
+import type * as workerScheduler from "../workerScheduler.js";
 
 import type {
   ApiFromModules,
@@ -23,13 +27,17 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  criteria: typeof criteria;
+  evaluators: typeof evaluators;
   postings: typeof postings;
   ranking: typeof ranking;
   rankingLlmCatalog: typeof rankingLlmCatalog;
   rankingScorePosting: typeof rankingScorePosting;
   runLogs: typeof runLogs;
   runs: typeof runs;
+  sourceContract: typeof sourceContract;
+  sourcePresets: typeof sourcePresets;
+  sources: typeof sources;
+  workerScheduler: typeof workerScheduler;
 }>;
 
 /**
