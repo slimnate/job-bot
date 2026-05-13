@@ -9,6 +9,7 @@ import {
   type ChromeDriver,
 } from '@job-bot/agent-core';
 
+import { isScrapeDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
 
 export type WorkerChromeSessionOptions = {
@@ -117,7 +118,17 @@ export class WorkerChromeSession {
       this.driver.isConnected() &&
       (await this.pingDriver().catch(() => false));
     if (pingOk) {
+      if (isScrapeDebug()) {
+        workerLog.debug('chrome.session.ping_ok', { port: this.options.port });
+      }
       return;
+    }
+
+    if (isScrapeDebug()) {
+      workerLog.debug('chrome.session.reconnect', {
+        manageChrome: this.options.manageChrome,
+        hadStarted: this.started,
+      });
     }
 
     await this.driver.disconnect().catch(() => {});
@@ -251,6 +262,13 @@ export class WorkerChromeSession {
   async closeAfterLinkedInScrape(): Promise<void> {
     if (!this.options.enabled) {
       return;
+    }
+    if (isScrapeDebug()) {
+      workerLog.debug('chrome.session.before_cleanup', {
+        autoCleanup: this.options.autoCleanupAfterLinkedInScrape,
+        manageChrome: this.options.manageChrome,
+        port: this.options.port,
+      });
     }
     if (!this.options.autoCleanupAfterLinkedInScrape) {
       workerLog.info('chrome.session', {

@@ -1044,6 +1044,25 @@ thead th {
   background: rgba(71, 85, 105, 0.22);
 }
 
+.log-level-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.log-level-filters-label {
+  font-weight: 600;
+}
+
+.log-level-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
 .log-viewer-table {
   table-layout: auto;
 }

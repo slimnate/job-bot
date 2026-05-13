@@ -3,6 +3,9 @@
  * same time navigates the same target from parallel tasks and breaks CDP (e.g. "Promise was
  * collected", disconnected client). This lock ensures at most one LinkedIn collection runs at a time.
  */
+import { isScrapeDebug } from './debugFlags.js';
+import { workerLog } from './log.js';
+
 let tail: Promise<void> = Promise.resolve();
 
 export async function withLinkedInBrowserExclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -12,9 +15,15 @@ export async function withLinkedInBrowserExclusive<T>(fn: () => Promise<T>): Pro
     release = resolve;
   });
   await previous;
+  if (isScrapeDebug()) {
+    workerLog.debug('linkedin.lock.acquired', {});
+  }
   try {
     return await fn();
   } finally {
+    if (isScrapeDebug()) {
+      workerLog.debug('linkedin.lock.released', {});
+    }
     release();
   }
 }

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { ConvexHttpClient } from 'convex/browser';
 
 import { initWorkerChromeFromEnv } from './chromeSession.js';
+import { isSchedulerDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
 import { parseLinkedInDebugSteps } from './sources/linkedinDebugSteps.js';
 import { WorkerOrchestrator } from './orchestrator.js';
@@ -71,6 +72,16 @@ export async function startWorker(): Promise<{
   workerLog.info('worker.scheduler_started', {
     chrome: chromeSession ? 'deferred_until_linkedin' : 'disabled',
   });
+  if (isSchedulerDebug()) {
+    workerLog.debug('worker.debug_config', {
+      WORKER_CRON_INTERVAL_MINUTES: process.env.WORKER_CRON_INTERVAL_MINUTES ?? null,
+      WORKER_QUEUE_CONCURRENCY: process.env.WORKER_QUEUE_CONCURRENCY ?? null,
+      WORKER_ENABLE_LLM_RANKING: process.env.WORKER_ENABLE_LLM_RANKING ?? null,
+      WORKER_HTTP_TRIGGER_PORT: process.env.WORKER_HTTP_TRIGGER_PORT ?? null,
+      WORKER_ID: process.env.WORKER_ID ?? null,
+      WORKER_LINKEDIN_DEBUG_STEPS: process.env.WORKER_LINKEDIN_DEBUG_STEPS ?? null,
+    });
+  }
   workerLog.info('linkedin.debug_steps', {
     mode: parseLinkedInDebugSteps(process.env),
     WORKER_LINKEDIN_DEBUG_STEPS: process.env.WORKER_LINKEDIN_DEBUG_STEPS ?? null,

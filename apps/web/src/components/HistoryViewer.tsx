@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
@@ -122,6 +122,39 @@ const logMessageCell = (line: ParsedLogLine): string => {
   return '-';
 };
 
+/** Known worker log levels for Run log modal filtering. */
+type LogLevelChoice = 'debug' | 'info' | 'warn' | 'error';
+
+const LOG_LEVEL_CHOICES: LogLevelChoice[] = ['debug', 'info', 'warn', 'error'];
+
+const defaultLogLevelFilter = (): Record<LogLevelChoice, boolean> => ({
+  debug: true,
+  info: true,
+  warn: true,
+  error: true,
+});
+
+/** Returns a known level, or `null` when the line should always pass the filter (unparseable / unknown level). */
+function parsedLogLevelForFilter(parsed: Record<string, unknown> | null): LogLevelChoice | null {
+  if (!parsed) {
+    return null;
+  }
+  const level = parsed.level;
+  if (typeof level !== 'string') {
+    return null;
+  }
+  const normalized = level.toLowerCase();
+  if (
+    normalized === 'debug' ||
+    normalized === 'info' ||
+    normalized === 'warn' ||
+    normalized === 'error'
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
 export function HistoryViewer() {
   const triggerRun = useMutation(api.runs.trigger);
   const updateStatus = useMutation(api.runs.updateStatus);
@@ -135,6 +168,7 @@ export function HistoryViewer() {
   const [triggerMessage, setTriggerMessage] = useState('');
   const [isTriggeringRun, setIsTriggeringRun] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<Id<'scrape_runs'> | null>(null);
+  const [logLevelFilter, setLogLevelFilter] = useState(defaultLogLevelFilter);
   const [actionBusyRunId, setActionBusyRunId] = useState<Id<'scrape_runs'> | null>(null);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
 
@@ -160,6 +194,22 @@ export function HistoryViewer() {
     () => (selectedLogs ? parseRunLogLines(selectedLogs) : []),
     [selectedLogs]
   );
+
+  useEffect(() => {
+    if (selectedRunId) {
+      setLogLevelFilter(defaultLogLevelFilter());
+    }
+  }, [selectedRunId]);
+
+  const filteredLogLines = useMemo(() => {
+    return parsedLogLines.filter((line) => {
+      const levelKey = parsedLogLevelForFilter(line.parsed);
+      if (levelKey === null) {
+        return true;
+      }
+      return logLevelFilter[levelKey];
+    });
+  }, [parsedLogLines, logLevelFilter]);
 
   const visibleRuns = useMemo(() => {
     if (!runs) {
@@ -431,6 +481,26 @@ export function HistoryViewer() {
                 <p>No logs stored for this run.</p>
               ) : (
                 <>
+                  <div className='log-level-filters'>
+                    <span className='log-level-filters-label'>Levels:</span>
+                    {LOG_LEVEL_CHOICES.map((lvl) => (
+                      <label key={lvl} className='log-level-filter-label'>
+                        <input
+                          type='checkbox'
+                          checked={logLevelFilter[lvl]}
+                          onChange={() =>
+                            setLogLevelFilter((prev) => ({ ...prev, [lvl]: !prev[lvl] }))
+                          }
+                        />
+                        {lvl}
+                      </label>
+                    ))}
+                  </div>
+                  {filteredLogLines.length < parsedLogLines.length ? (
+                    <p className='status-text'>
+                      Showing {filteredLogLines.length} of {parsedLogLines.length} lines
+                    </p>
+                  ) : null}
                   <div className='table-wrapper'>
                     <table className='log-viewer-table'>
                       <thead>
@@ -445,7 +515,7 @@ export function HistoryViewer() {
                         </tr>
                       </thead>
                       <tbody>
-                        {parsedLogLines.map((line) => {
+                        {filteredLogLines.map((line) => {
                           const level = logLevelCell(line.parsed);
                           const ts = logTimestampCell(line.parsed);
                           return (

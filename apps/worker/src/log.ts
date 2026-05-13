@@ -76,10 +76,9 @@ function writeLine(level: LogLevel, message: string, fields: LogFields): void {
 }
 
 export const workerLog = {
+  /** Always emitted when called; use subsystem env flags to avoid noisy call sites. */
   debug(message: string, fields: LogFields = {}): void {
-    if (process.env.WORKER_LOG_LEVEL === 'debug') {
-      writeLine('debug', message, fields);
-    }
+    writeLine('debug', message, fields);
   },
   info(message: string, fields: LogFields = {}): void {
     writeLine('info', message, fields);

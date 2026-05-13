@@ -4,6 +4,7 @@ import { api } from './convexBridge/api.js';
 import type { Doc, Id } from './convexBridge/doc.js';
 
 const runIdKey = (runId: Id<'scrape_runs'>): string => runId as string;
+import { isOrchestratorDebug } from './debugFlags.js';
 import { drainRunLogPending, withRunLogContext, workerLog } from './log.js';
 import { InMemoryTaskQueue } from './queue.js';
 import { rankJobsWithLlm, type LlmRankingCandidate } from './ranking/rankJobsWithLlm.js';
@@ -77,6 +78,7 @@ export class WorkerOrchestrator {
     return withRetry(operation, {
       ...convexRetryOptions,
       label,
+      retryDebugSubsystem: 'orchestrator',
     });
   }
 
@@ -95,8 +97,18 @@ export class WorkerOrchestrator {
         source: input.source ?? 'linkedin',
       }));
 
+    if (isOrchestratorDebug()) {
+      workerLog.debug('orchestrator.trigger.result', {
+        runCount: entries.length,
+        source: input.source ?? null,
+      });
+    }
+
     for (const entry of entries) {
       if (!this.tryClaimRun(entry.runId)) {
+        if (isOrchestratorDebug()) {
+          workerLog.debug('orchestrator.run.skip_duplicate', { runId: entry.runId });
+        }
         continue;
       }
       this.queue.enqueue({
@@ -125,10 +137,19 @@ export class WorkerOrchestrator {
       })
     );
 
+    if (isOrchestratorDebug()) {
+      workerLog.debug('orchestrator.db_queued.scan', { fetchedCount: queued.length });
+    }
+
+    let enqueuedFromDb = 0;
     for (const row of queued) {
       if (!this.tryClaimRun(row._id)) {
+        if (isOrchestratorDebug()) {
+          workerLog.debug('orchestrator.run.skip_duplicate', { runId: row._id });
+        }
         continue;
       }
+      enqueuedFromDb += 1;
       this.queue.enqueue({
         id: `run:${row._id}`,
         context: { runId: row._id, source: row.source },
@@ -140,6 +161,9 @@ export class WorkerOrchestrator {
           }
         },
       });
+    }
+    if (isOrchestratorDebug()) {
+      workerLog.debug('orchestrator.db_queued.enqueued', { enqueuedCount: enqueuedFromDb });
     }
   }
 
@@ -167,16 +191,36 @@ export class WorkerOrchestrator {
 
   /**
    * Persists buffered JSON log lines to Convex in chunks; safe to call when the buffer is empty.
+   *
+   * When `ORCHESTRATOR_DEBUG` is on, emits one `run.log.flush` line per invocation via `console.log`
+   * (not `workerLog`) so the diagnostic is never appended to the run log buffer — that would
+   * re-fill `pending` and spin the `withRunLogContext` finally loop.
    */
   private async flushRunLogsToConvex(): Promise<void> {
     const CHUNK = 300;
+    let totalFlushed = 0;
+    let lastRunId: Id<'scrape_runs'> | undefined;
     for (;;) {
       const drained = drainRunLogPending();
       if (!drained?.entries.length) {
+        if (isOrchestratorDebug() && totalFlushed > 0 && lastRunId !== undefined) {
+          console.log(
+            JSON.stringify({
+              ts: new Date().toISOString(),
+              level: 'debug',
+              msg: 'run.log.flush',
+              service: 'job-bot-worker',
+              runId: lastRunId,
+              lineCount: totalFlushed,
+            })
+          );
+        }
         return;
       }
+      lastRunId = drained.runId;
       for (let i = 0; i < drained.entries.length; i += CHUNK) {
         const chunk = drained.entries.slice(i, i + CHUNK);
+        totalFlushed += chunk.length;
         await this.runConvex(`runLogs.appendBatch:${drained.runId}`, () =>
           this.convex.mutation(api.runLogs.appendBatch, {
             runId: drained.runId,
@@ -212,6 +256,14 @@ export class WorkerOrchestrator {
         throw new Error(`Run not found: ${payload.runId}`);
       }
 
+      if (isOrchestratorDebug()) {
+        workerLog.debug('run.doc.loaded', {
+          runId: payload.runId,
+          source: runDoc.source,
+          hasEvaluatorId: Boolean(runDoc.evaluatorId),
+        });
+      }
+
       try {
         /** LinkedIn streams one posting per mutation during scrape; inserts happen there. The batch upsert below then updates existing rows, so its `inserted` is usually 0 unless we sum stream calls. */
         let streamedInserted = 0;
@@ -238,6 +290,7 @@ export class WorkerOrchestrator {
             baseDelayMs: 400,
             maxDelayMs: 2000,
             label: `collectPostings:${payload.source}`,
+            retryDebugSubsystem: 'orchestrator',
           }
         );
 

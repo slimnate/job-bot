@@ -1,3 +1,4 @@
+import { isSchedulerDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
 
 export type QueueTask<TContext = void> = {
@@ -23,6 +24,13 @@ export class InMemoryTaskQueue<TContext = void> {
   enqueue(task: QueueTask<TContext>): void {
     this.pending.push(task);
     const depth = this.pending.length;
+    if (isSchedulerDebug()) {
+      workerLog.debug('queue.enqueue', {
+        taskId: task.id,
+        depth,
+        running: this.activeCount,
+      });
+    }
     if (depth > 200) {
       workerLog.warn('queue.depth.high', {
         depth,
@@ -48,6 +56,13 @@ export class InMemoryTaskQueue<TContext = void> {
       }
 
       this.activeCount += 1;
+      if (isSchedulerDebug()) {
+        workerLog.debug('queue.task.start', {
+          taskId: task.id,
+          queued: this.pending.length,
+          running: this.activeCount,
+        });
+      }
       void task
         .run(task.context)
         .catch((error: unknown) => {
@@ -58,6 +73,13 @@ export class InMemoryTaskQueue<TContext = void> {
         })
         .finally(() => {
           this.activeCount -= 1;
+          if (isSchedulerDebug()) {
+            workerLog.debug('queue.task.finish', {
+              taskId: task.id,
+              queued: this.pending.length,
+              running: this.activeCount,
+            });
+          }
           this.drain();
         });
     }

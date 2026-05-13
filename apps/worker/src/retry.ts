@@ -1,3 +1,8 @@
+import { isOrchestratorDebug, isRankDebug } from './debugFlags.js';
+import { workerLog } from './log.js';
+
+export type RetryDebugSubsystem = 'orchestrator' | 'rank';
+
 export type RetryOptions = {
   maxAttempts: number;
   baseDelayMs: number;
@@ -5,6 +10,11 @@ export type RetryOptions = {
   jitterRatio?: number;
   label?: string;
   isRetryable?: (error: unknown) => boolean;
+  /**
+   * When set, logs `retry.attempt` at debug level before backing off if the matching
+   * `ORCHESTRATOR_DEBUG` / `RANK_DEBUG` env flag is on. Omit for silent retries.
+   */
+  retryDebugSubsystem?: RetryDebugSubsystem;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -41,6 +51,7 @@ export async function withRetry<T>(operation: () => Promise<T>, options: RetryOp
     jitterRatio = 0.2,
     label,
     isRetryable = defaultIsRetryable,
+    retryDebugSubsystem,
   } = options;
 
   const attempts = Math.max(1, Math.floor(maxAttempts));
@@ -55,7 +66,24 @@ export async function withRetry<T>(operation: () => Promise<T>, options: RetryOp
       }
       const exp = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
       const jitter = exp * jitterRatio * Math.random();
-      await sleep(exp + jitter);
+      const delayMs = exp + jitter;
+      if (retryDebugSubsystem) {
+        const allow =
+          retryDebugSubsystem === 'orchestrator'
+            ? isOrchestratorDebug()
+            : isRankDebug();
+        if (allow) {
+          workerLog.debug('retry.attempt', {
+            subsystem: retryDebugSubsystem,
+            label: label ?? null,
+            attempt,
+            maxAttempts: attempts,
+            delayMs: Math.round(delayMs),
+            err: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      await sleep(delayMs);
     }
   }
 

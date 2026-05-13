@@ -56,6 +56,37 @@ export function buildLinkedInJobsListScrapeExpression(
       return null;
     };
 
+    /** Pushes scrape counters into the injected overlay badges (no-op if overlay lacks updateScrapeStats). */
+    function syncScrapeStats(onPageCount, pageIdx) {
+      try {
+        if (
+          !window.__jobBotScrape ||
+          typeof window.__jobBotScrape.updateScrapeStats !== 'function'
+        ) {
+          return;
+        }
+        window.__jobBotScrape.updateScrapeStats({
+          scraped: collected.length,
+          onPage: onPageCount,
+          pageIndex: pageIdx,
+          maxPages: MAX_PAGES,
+          maxCollectedJobs: MAX_COLLECTED_JOBS,
+        });
+      } catch (e) {}
+    }
+
+    /** Blocks until user resumes or scrape stops (abort / finish early). */
+    async function waitIfPaused() {
+      const tickMs = 200;
+      for (;;) {
+        const st = scrapeStopped();
+        if (st) return;
+        var bot = window.__jobBotScrape;
+        if (!bot || !bot.paused) return;
+        await sleep(tickMs);
+      }
+    }
+
     async function waitMajor(stepLabel) {
       if (DEBUG === 'none') return;
       if (!window.__jobBotScrape || typeof window.__jobBotScrape.waitStep !== 'function') return;
@@ -216,6 +247,8 @@ export function buildLinkedInJobsListScrapeExpression(
           if (st) return st;
         }
 
+        await waitIfPaused();
+
         if (pageIndex > 1) {
           await waitMajor('Before Next page (' + (pageIndex - 1) + '→' + pageIndex + ')');
           {
@@ -238,6 +271,8 @@ export function buildLinkedInJobsListScrapeExpression(
           }
 
           const targets = getClickableTargets();
+          syncScrapeStats(targets.length, pageIndex);
+          await waitIfPaused();
 
           for (const target of targets) {
             {
@@ -255,6 +290,8 @@ export function buildLinkedInJobsListScrapeExpression(
               (target.textContent || '').trim().slice(0, 180);
             if (clickedKeys.has(key)) continue;
             clickedKeys.add(key);
+
+            await waitIfPaused();
 
             target.scrollIntoView({ block: 'center', behavior: 'instant' });
             target.click();
@@ -321,6 +358,7 @@ export function buildLinkedInJobsListScrapeExpression(
               },
             };
             collected.push(jobRecord);
+            syncScrapeStats(targets.length, pageIndex);
 
             try {
               if (typeof __jobBotPostingPush === 'function') {

@@ -1,6 +1,7 @@
 import { ConvexHttpClient } from 'convex/browser';
 
 import { api } from './convexBridge/api.js';
+import { isSchedulerDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
 import { WorkerOrchestrator } from './orchestrator.js';
 
@@ -157,6 +158,13 @@ export class WorkerScheduler {
       this.tickInFlight = true;
       void this.flushStatus();
       const tickStartedAt = Date.now();
+      if (isSchedulerDebug()) {
+        workerLog.debug('scheduler.tick.begin', {
+          trigger,
+          tickInFlight: this.tickInFlight,
+          queueSnapshot: this.orchestrator.queueSnapshot(),
+        });
+      }
       try {
         /**
          * Manual queueing mode: only consume runs that already exist in Convex queue.
@@ -202,6 +210,9 @@ export class WorkerScheduler {
    */
   private async flushStatus(): Promise<void> {
     if (this.statusFlushInFlight) {
+      if (isSchedulerDebug()) {
+        workerLog.debug('scheduler.status_flush_skipped', { reason: 'statusFlushInFlight' });
+      }
       return;
     }
     this.statusFlushInFlight = true;

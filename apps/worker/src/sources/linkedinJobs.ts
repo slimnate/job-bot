@@ -1,11 +1,11 @@
 import { JOB_BOT_POSTING_PUSH_BINDING, type ChromeDriver } from '@job-bot/agent-core';
 
 import type { Id } from '../convexBridge/doc.js';
+import { isScrapeDebug } from '../debugFlags.js';
 import { workerLog } from '../log.js';
 import type { ScrapeResult, ScrapedPostingInput } from '../scrapeTypes.js';
 
 import {
-  linkedInOverlayKind,
   parseLinkedInDebugSteps,
   type LinkedInDebugSteps,
 } from './linkedinDebugSteps.js';
@@ -82,6 +82,26 @@ function parseLinkedInMaxPostingsFromEnv(env: NodeJS.ProcessEnv): number | undef
   return n;
 }
 
+/**
+ * Booleans from `LINKEDIN_SHELL_POLL_SCRIPT` for troubleshooting sign-in / jobs-shell detection in Convex run logs.
+ * No credentials or page body text — only URL path and selector hits.
+ */
+type LoginPollDebug = {
+  path: string;
+  onLoginUrl: boolean;
+  onMemberOnlyPath: boolean;
+  hasMemberNav: boolean;
+  hasNarrowGuestChrome: boolean;
+  /** `signedIn` branch: member-only path (e.g. /feed) and not a login URL. */
+  signedInPathOk: boolean;
+  /** `signedIn` branch: global nav / profile signals and no narrow guest chrome. */
+  signedInNavOk: boolean;
+  hasResultsShell: boolean;
+  hasJobsHub: boolean;
+  onJobsArea: boolean;
+  hasJobLink: boolean;
+};
+
 type LoginPoll = {
   onLogin: boolean;
   signedIn: boolean;
@@ -89,7 +109,23 @@ type LoginPoll = {
   href: string;
   /** Why we are still waiting (for logs only). */
   waitReason: string;
+  debug: LoginPollDebug;
 };
+
+const LINKEDIN_COOKIE_CHECK_URLS = ['https://www.linkedin.com/', 'https://www.linkedin.com/jobs/'] as const;
+
+/**
+ * True when Chrome has a non-empty LinkedIn `li_at` cookie. It is httpOnly, so in-page scripts cannot
+ * see it — but CDP can. DOM heuristics alone often report `signedIn: false` on /feed and /jobs while
+ * the session is valid (see run logs: `hasShell: true`, `signedIn: false`).
+ */
+async function linkedInSessionCookiePresent(driver: ChromeDriver): Promise<boolean> {
+  if (!driver.getCookiesForUrls) {
+    return false;
+  }
+  const rows = await driver.getCookiesForUrls([...LINKEDIN_COOKIE_CHECK_URLS]);
+  return rows.some((c) => c.name === 'li_at' && c.value.trim().length > 0);
+}
 
 /**
  * Page script: detect login/checkpoint vs jobs UI. The jobs *hub* at /jobs/ often has no
@@ -120,17 +156,22 @@ const LINKEDIN_SHELL_POLL_SCRIPT = `(() => {
       (visible(pwd) && /login|checkpoint/i.test(path))
   );
 
-  const hasGuestSignIn = Boolean(
+  // Guest / auth-wall prompts only — do not match generic /login links (feed still embeds those).
+  const hasNarrowGuestChrome = Boolean(
     document.querySelector(
-      'a[href*="/login"], a[href*="/uas/login"], a[href*="/authwall"], a[data-tracking-control-name*="guest_homepage"], button[data-tracking-control-name*="guest_homepage"]'
+      'a[href*="/uas/login"], a[href*="/authwall"], a[data-tracking-control-name*="guest_homepage"], button[data-tracking-control-name*="guest_homepage"]'
     )
   );
   const hasMemberNav = Boolean(
     document.querySelector(
-      'a[href^="/feed/"], nav.global-nav, img.global-nav__me-photo, button[aria-label*="Me"], a[data-control-name*="nav.profile"]'
+      'a[href^="/feed/"], a[href="/feed/"], a[href^="https://www.linkedin.com/feed"], nav.global-nav, nav[aria-label="Primary Navigation"], img.global-nav__me-photo, button[aria-label*="Me" i], button[aria-label*="Your profile" i], a[data-control-name*="nav.profile"], a[href^="/in/"], #global-nav'
     )
   );
-  const signedIn = Boolean(!onLoginForm && hasMemberNav && !hasGuestSignIn);
+  // Locale paths like /en/feed/ — segment regex (avoid only matching path === /feed).
+  const onMemberOnlyPath = /(^|\\/)(feed|mynetwork|messaging|notifications)(\\/|$)/.test(path);
+  const signedInPathOk = Boolean(!onLoginForm && onMemberOnlyPath && !onLoginUrl);
+  const signedInNavOk = Boolean(!onLoginForm && hasMemberNav && !hasNarrowGuestChrome);
+  const signedIn = Boolean(signedInPathOk || signedInNavOk);
 
   const hasResultsShell = Boolean(
     document.querySelector(
@@ -173,6 +214,19 @@ const LINKEDIN_SHELL_POLL_SCRIPT = `(() => {
     hasShell,
     href,
     waitReason,
+    debug: {
+      path,
+      onLoginUrl,
+      onMemberOnlyPath,
+      hasMemberNav,
+      hasNarrowGuestChrome,
+      signedInPathOk,
+      signedInNavOk,
+      hasResultsShell,
+      hasJobsHub,
+      onJobsArea,
+      hasJobLink,
+    },
   };
 })()`;
 
@@ -265,12 +319,88 @@ async function waitForLinkedInJobsShell(
 ): Promise<void> {
   const start = Date.now();
   let autoLoginAttempted = false;
+  /**
+   * Signed-in user on feed/home/checkpoint-complete still needs an explicit `/jobs/` navigation;
+   * we only do this once per wait so we do not fight in-page LinkedIn redirects.
+   */
+  let didNavigateToJobsFromNonJobs = false;
+  /**
+   * Signed-in on `/jobs/` but selectors have not matched yet (slow or stuck layout) — one reload
+   * of the jobs hub after a stall threshold.
+   */
+  let didRetryJobsHubNavigation = false;
+  /** When we first saw signed-in on `/jobs/` without a jobs shell (for stall retry timing). */
+  let signedInOnJobsWithoutShellSince: number | null = null;
+  /**
+   * Guest / intermediate pages sometimes show no login form; with env creds, open `/login` once
+   * so `buildLinkedInAutoLoginExpression` can run.
+   */
+  let loginPageNavigationAttempted = false;
+
+  const JOBS_HUB_URL = 'https://www.linkedin.com/jobs/';
+  const onLinkedInJobsPath = (href: string): boolean => /linkedin\.com\/jobs/i.test(href);
 
   while (Date.now() - start < timeoutMs) {
     const state = await driver.evaluate<LoginPoll>(LINKEDIN_SHELL_POLL_SCRIPT);
+    const liAtPresent = await linkedInSessionCookiePresent(driver);
+    const signedInEffective = state.signedIn || liAtPresent;
 
-    if (state.signedIn && !state.onLogin && state.hasShell) {
+    if (signedInEffective && !state.onLogin && state.hasShell) {
       return;
+    }
+
+    if (signedInEffective && !state.onLogin && !state.hasShell) {
+      const onJobs = onLinkedInJobsPath(state.href);
+      if (!onJobs && !didNavigateToJobsFromNonJobs) {
+        didNavigateToJobsFromNonJobs = true;
+        workerLog.info('linkedin.navigate', {
+          reason: 'signed_in_off_jobs_hub',
+          href: state.href,
+        });
+        await driver.navigate(JOBS_HUB_URL, { timeoutMs: 60_000 });
+        await sleep(2500);
+        signedInOnJobsWithoutShellSince = null;
+        continue;
+      }
+      if (onJobs) {
+        if (signedInOnJobsWithoutShellSince === null) {
+          signedInOnJobsWithoutShellSince = Date.now();
+        } else if (
+          !didRetryJobsHubNavigation &&
+          Date.now() - signedInOnJobsWithoutShellSince > 12_000
+        ) {
+          didRetryJobsHubNavigation = true;
+          workerLog.info('linkedin.navigate', {
+            reason: 'signed_in_jobs_shell_stall_retry',
+            href: state.href,
+            stalledMs: Date.now() - signedInOnJobsWithoutShellSince,
+          });
+          await driver.navigate(JOBS_HUB_URL, { timeoutMs: 60_000 });
+          await sleep(2500);
+          signedInOnJobsWithoutShellSince = Date.now();
+          continue;
+        }
+      }
+    } else {
+      signedInOnJobsWithoutShellSince = null;
+    }
+
+    if (
+      autoLogin &&
+      !autoLoginAttempted &&
+      !signedInEffective &&
+      !state.onLogin &&
+      !loginPageNavigationAttempted &&
+      Date.now() - start > 4000
+    ) {
+      loginPageNavigationAttempted = true;
+      workerLog.info('linkedin.auto_login', {
+        phase: 'navigate_login_page',
+        href: state.href,
+      });
+      await driver.navigate('https://www.linkedin.com/login', { timeoutMs: 60_000 });
+      await sleep(2000);
+      continue;
     }
 
     if (state.onLogin && autoLogin && !autoLoginAttempted) {
@@ -279,10 +409,12 @@ async function waitForLinkedInJobsShell(
         phase: 'attempt',
         href: state.href,
       });
+      let submittedOk = false;
       try {
         const expr = buildLinkedInAutoLoginExpression(autoLogin.user, autoLogin.password);
         const result = await driver.evaluate<{ ok: boolean; reason?: string; via?: string }>(expr);
         if (result.ok) {
+          submittedOk = true;
           workerLog.info('linkedin.auto_login', {
             phase: 'submitted',
             via: result.via ?? 'unknown',
@@ -299,17 +431,36 @@ async function waitForLinkedInJobsShell(
           message: err instanceof Error ? err.message : String(err),
         });
       }
-      await sleep(4000);
+      await sleep(submittedOk ? 4000 : 1500);
+      if (submittedOk) {
+        workerLog.info('linkedin.navigate', {
+          reason: 'after_auto_login_submit',
+          href: state.href,
+        });
+        await driver.navigate(JOBS_HUB_URL, { timeoutMs: 60_000 });
+        await sleep(2500);
+        signedInOnJobsWithoutShellSince = null;
+      }
       continue;
     }
+
+    const waitReasonEffective = !signedInEffective
+      ? 'not_signed_in'
+      : !state.hasShell
+        ? 'no_jobs_ui_match'
+        : 'ok';
 
     workerLog.info('linkedin.login_wait', {
       phase: 'polling',
       href: state.href,
       onLogin: state.onLogin,
-      signedIn: state.signedIn,
+      signedIn: signedInEffective,
+      signedInDom: state.signedIn,
+      liAtPresent,
       hasShell: state.hasShell,
-      waitReason: state.waitReason,
+      waitReason: waitReasonEffective,
+      waitReasonDom: state.waitReason,
+      dbg: state.debug,
     });
     await sleep(2500);
   }
@@ -498,24 +649,8 @@ export async function collectLinkedInPostings(params: {
   /** When set (worker orchestrator), each scraped job is pushed over CDP and upserted immediately. */
   streamPosting?: (posting: ScrapedPostingInput) => Promise<void>;
 }): Promise<ScrapeResult> {
-  // #region agent log
-  fetch('http://127.0.0.1:7497/ingest/a72e9a30-5649-4c67-82f3-8d4eaa4b35cd', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': '779013',
-    },
-    body: JSON.stringify({
-      sessionId: '779013',
-      location: 'linkedinJobs.ts:collectLinkedInPostings',
-      message: 'collectLinkedInPostings body entered',
-      data: { runId: params.runId, hypothesisId: 'A' },
-      timestamp: Date.now(),
-      hypothesisId: 'A',
-    }),
-  }).catch(() => {});
-  // #endregion
   const debugMode: LinkedInDebugSteps = parseLinkedInDebugSteps(params.env);
+  const steppingEnabled = debugMode === 'coarse' || debugMode === 'fine';
   const linkedInMaxPages = parseLinkedInPagesFromEnv(params.env);
   const linkedInMaxPostings = parseLinkedInMaxPostingsFromEnv(params.env);
   const headless = parseEnvBool(params.env.WORKER_CHROME_HEADLESS, true);
@@ -538,15 +673,16 @@ export async function collectLinkedInPostings(params: {
     });
   }
 
-  const overlayKind = linkedInOverlayKind(debugMode);
-
   /**
    * Must run **after** `navigate` + `waitForLinkedInJobsShell` on the LinkedIn document.
    * Injecting before navigation targets the previous blank/start page; the next load wipes the overlay
    * so `window.__jobBotScrape` is missing and debug steps / scraping appear to hang or no-op.
    */
   const injectOverlayIfNeeded = async (): Promise<void> => {
-    await injectLinkedInScrapeOverlay(params.driver, overlayKind);
+    if (isScrapeDebug()) {
+      workerLog.debug('linkedin.overlay.inject', { phase: 'before_evaluate' });
+    }
+    await injectLinkedInScrapeOverlay(params.driver);
   };
 
   let uninstallPostingStream: (() => Promise<void>) | undefined;
@@ -566,6 +702,9 @@ export async function collectLinkedInPostings(params: {
               return;
             }
             if (streamedExternalIds.has(id)) {
+              if (isScrapeDebug()) {
+                workerLog.debug('linkedin.stream_posting.skip_dedupe', { externalId: id });
+              }
               return;
             }
             if (
@@ -592,6 +731,10 @@ export async function collectLinkedInPostings(params: {
     await params.driver.navigate('https://www.linkedin.com/jobs/', { timeoutMs: 60_000 });
     await waitForLinkedInJobsShell(params.driver, 15 * 60 * 1000, autoLogin);
 
+    if (isScrapeDebug()) {
+      workerLog.debug('linkedin.milestone', { phase: 'after_initial_jobs_shell' });
+    }
+
     await injectOverlayIfNeeded();
 
     let searchStrategyUsed: 'ui' | 'url_fallback' | 'preferences_hub' = 'preferences_hub';
@@ -613,6 +756,9 @@ export async function collectLinkedInPostings(params: {
           hasLocation: locationRaw.length > 0,
         });
         await sleep(2800);
+        if (isScrapeDebug()) {
+          workerLog.debug('linkedin.milestone', { phase: 'after_search_ui_sleep' });
+        }
         await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
       } else {
         fallbackReason = uiResult.reason ?? 'ui_search_failed';
@@ -642,8 +788,10 @@ export async function collectLinkedInPostings(params: {
         await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
       }
     } else {
-      if (debugMode !== 'none') {
-        workerLog.info('linkedin.debug_step', { phase: 'jobs_hub_before_show_all' });
+      if (steppingEnabled) {
+        if (isScrapeDebug()) {
+          workerLog.debug('linkedin.debug_step', { phase: 'jobs_hub_before_show_all' });
+        }
         await linkedInWaitStep(params.driver, {
           stepLabel: 'Jobs hub loaded — confirm before opening “Show all”',
         });
@@ -667,8 +815,10 @@ export async function collectLinkedInPostings(params: {
     }
 
     await injectOverlayIfNeeded();
-    if (debugMode !== 'none') {
-      workerLog.info('linkedin.debug_step', { phase: 'after_search_navigation' });
+    if (steppingEnabled) {
+      if (isScrapeDebug()) {
+        workerLog.debug('linkedin.debug_step', { phase: 'after_search_navigation' });
+      }
       await linkedInWaitStep(params.driver, {
         stepLabel: 'After search navigation (results shell)',
       });
@@ -760,27 +910,6 @@ export async function collectLinkedInPostings(params: {
       },
     }));
 
-    // #region agent log
-    fetch('http://127.0.0.1:7497/ingest/a72e9a30-5649-4c67-82f3-8d4eaa4b35cd', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '779013',
-      },
-      body: JSON.stringify({
-        sessionId: '779013',
-        location: 'linkedinJobs.ts:collectLinkedInPostings',
-        message: 'collectLinkedInPostings returning success',
-        data: {
-          runId: params.runId,
-          postingsCount: postings.length,
-          verify: 'post-await-fix',
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'A',
-      }),
-    }).catch(() => {});
-    // #endregion
     return {
       postings,
       stats: {

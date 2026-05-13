@@ -2,6 +2,7 @@ import type { Doc, Id } from '../convexBridge/doc.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { isRankDebug } from '../debugFlags.js';
 import { workerLog } from '../log.js';
 import { withRetry } from '../retry.js';
 
@@ -308,6 +309,7 @@ async function callLlmForRankings(
       baseDelayMs: 600,
       maxDelayMs: 10000,
       label: 'llm.http.chat_completions',
+      retryDebugSubsystem: 'rank',
     }
   );
 }
@@ -403,6 +405,13 @@ export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
   });
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
+    if (isRankDebug()) {
+      workerLog.debug('llm.rank.attempt', {
+        provider,
+        attempt,
+        candidateCount: payload.candidates.length,
+      });
+    }
     const parsed =
       provider === 'cursor' && cursorConfig
         ? await callCursorCliForRankings(payload, cursorConfig, attempt === 2)
@@ -417,6 +426,14 @@ export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
         break;
       }
       continue;
+    }
+
+    if (isRankDebug()) {
+      workerLog.debug('llm.rank.parsed', {
+        provider,
+        attempt,
+        rawRankingsCount: parsed.length,
+      });
     }
 
     const normalized = ensureAllCandidatesRanked(payload.candidates, parsed);

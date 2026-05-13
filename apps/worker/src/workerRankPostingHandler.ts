@@ -4,6 +4,7 @@ import { ConvexHttpClient } from 'convex/browser';
 
 import { api } from './convexBridge/api.js';
 import type { Doc, Id } from './convexBridge/doc.js';
+import { isRankDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
 import { rankJobsWithCursor, type LlmRankingCandidate } from './ranking/rankJobsWithLlm.js';
 import { withRetry } from './retry.js';
@@ -96,10 +97,14 @@ export async function handleRankPostingRequest(params: {
     return withRetry(operation, {
       ...convexRetryOptions,
       label,
+      retryDebugSubsystem: 'rank',
     });
   }
 
   try {
+    if (isRankDebug()) {
+      workerLog.debug('rank_posting.request', { postingId, evaluatorId, model });
+    }
     const posting = await runConvex('postings.getById', () =>
       convex.query(api.postings.getById, { postingId: postingId as Id<'job_postings'> })
     );
@@ -116,6 +121,13 @@ export async function handleRankPostingRequest(params: {
       res.writeHead(404, { ...corsJson, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'Evaluator profile not found' }));
       return;
+    }
+
+    if (isRankDebug()) {
+      workerLog.debug('rank_posting.loaded', {
+        postingId,
+        evaluatorId: evaluator._id,
+      });
     }
 
     const candidates: LlmRankingCandidate[] = [
@@ -137,6 +149,10 @@ export async function handleRankPostingRequest(params: {
       evaluatorId,
       model,
     });
+
+    if (isRankDebug()) {
+      workerLog.debug('rank_posting.invoke', { provider: 'cursor', candidateCount: candidates.length });
+    }
 
     const rankingResult = await rankJobsWithCursor({
       evaluator: evaluator as Doc<'job_evaluators'>,
@@ -228,10 +244,18 @@ export async function handleRankPostingsRequest(params: {
     return withRetry(operation, {
       ...convexRetryOptions,
       label,
+      retryDebugSubsystem: 'rank',
     });
   }
 
   try {
+    if (isRankDebug()) {
+      workerLog.debug('rank_postings.request', {
+        postingCount: postingIds.length,
+        evaluatorId,
+        model,
+      });
+    }
     const evaluator = await runConvex('evaluators.getById', () =>
       convex.query(api.evaluators.getById, { id: evaluatorId as Id<'job_evaluators'> })
     );
@@ -267,11 +291,22 @@ export async function handleRankPostingsRequest(params: {
       return;
     }
 
+    if (isRankDebug()) {
+      workerLog.debug('rank_postings.loaded', {
+        evaluatorId: evaluator._id,
+        candidateCount: candidates.length,
+      });
+    }
+
     workerLog.info('rank_postings.start', {
       postingCount: candidates.length,
       evaluatorId,
       model,
     });
+
+    if (isRankDebug()) {
+      workerLog.debug('rank_postings.invoke', { provider: 'cursor', candidateCount: candidates.length });
+    }
 
     const rankingResult = await rankJobsWithCursor({
       evaluator: evaluator as Doc<'job_evaluators'>,
