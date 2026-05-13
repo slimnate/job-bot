@@ -230,7 +230,7 @@ Per workspace:
 ## UI behavior notes and edge cases
 
 - Workers route is now `/workers` with legacy redirects from `/history`.
-- Workers **Scheduler** panel is backed by a Convex reactive query (`worker_scheduler_status`). The worker writes status on start/stop, around every tick, and on a 5s heartbeat interval (`flushStatus` in `apps/worker/src/scheduler.ts`); the dashboard flips the timer badge to **stale** (red) when the heartbeat is older than 30 seconds, which usually means the worker process died. State persists across worker restarts.
+- Workers **Scheduler** panel is backed by a Convex reactive query (`worker_scheduler_status`). The worker writes status on start/stop, around every tick, and on a 5s heartbeat interval (`flushStatus` in `apps/worker/src/scheduler.ts`); the dashboard flips the timer badge to **stale** (red) when the heartbeat is older than 30 seconds, which usually means the worker process died. State persists across worker restarts. The inline **live** heartbeat label stays the word `live` (no per-second age text) until that same 30s threshold; hover still shows the absolute last heartbeat time.
 - The worker still exposes `GET /scheduler` on `WORKER_HTTP_TRIGGER_PORT` for ad-hoc `curl` inspection, but the dashboard no longer depends on it.
 - Workers history shows LinkedIn search path and highlights URL fallback runs with a warning-style indicator.
 - History `Stop` behavior:

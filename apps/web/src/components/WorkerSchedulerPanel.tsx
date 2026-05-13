@@ -103,6 +103,10 @@ function formatRelativePast(ts: number, now: number): string {
  * is older than `STALE_THRESHOLD_MS`, indicating the worker may have
  * crashed even though the last persisted `timerActive` was true.
  *
+ * The first-row heartbeat chip shows the fixed text `live` while fresh
+ * (same threshold) so it does not tick every second; only the stale
+ * branch shows a relative "last hb …" age that updates with the panel clock.
+ *
  * Layout is intentionally dense (two text rows + optional error) to keep
  * vertical footprint small on the Workers page.
  */
@@ -150,12 +154,16 @@ export function WorkerSchedulerPanel() {
             </span>
             <span
               className={isStale ? 'scheduler-compact__live scheduler-compact__live--stale' : 'scheduler-compact__live'}
-              title={`Heartbeat: ${formatDateTime(status.heartbeatAt)} · stale after ${STALE_THRESHOLD_MS / 1000}s`}
+              title={
+                isStale
+                  ? `No heartbeat for ${STALE_THRESHOLD_MS / 1000}s+ · last: ${formatDateTime(status.heartbeatAt)}`
+                  : `Last heartbeat: ${formatDateTime(status.heartbeatAt)} · stale label after ${STALE_THRESHOLD_MS / 1000}s without ping`
+              }
             >
               {isStale ? (
                 <>last hb {formatRelativePast(status.heartbeatAt, nowTick)}</>
               ) : (
-                <>live {formatRelativePast(status.heartbeatAt, nowTick)}</>
+                <>live</>
               )}
             </span>
           </div>
