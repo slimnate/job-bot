@@ -9,6 +9,7 @@ import {
   parseLinkedInDebugSteps,
   type LinkedInDebugSteps,
 } from './linkedinDebugSteps.js';
+import { resolveLinkedInSearchCriteria } from './linkedinSearchCriteria.js';
 import { buildLinkedInJobsListScrapeExpression } from './linkedinScrapeBundle.js';
 import {
   injectLinkedInScrapeOverlay,
@@ -641,6 +642,8 @@ type BundleOutcome =
   | { error: string }
   | { aborted: true; jobs: BundleJob[] };
 
+export { resolveLinkedInSearchCriteria } from './linkedinSearchCriteria.js';
+
 export async function collectLinkedInPostings(params: {
   runId: Id<'scrape_runs'>;
   sourceCriteria?: Record<string, string>;
@@ -661,9 +664,16 @@ export async function collectLinkedInPostings(params: {
     });
   }
 
-  const queryRaw = params.sourceCriteria?.search?.trim() ?? '';
-  const locationRaw = params.sourceCriteria?.location?.trim() ?? '';
-  const geoIdRaw = params.sourceCriteria?.geoId?.trim() ?? '';
+  const { search: queryRaw, location: locationRaw, geoId: geoIdRaw } =
+    resolveLinkedInSearchCriteria(params.sourceCriteria);
+  const droppedLocation =
+    geoIdRaw.length > 0 && (params.sourceCriteria?.location?.trim() ?? '').length > 0;
+  if (droppedLocation) {
+    workerLog.info('linkedin.criteria', {
+      message: 'geoId preferred over location; location text ignored for this run',
+      geoId: geoIdRaw,
+    });
+  }
   const useSearchPath =
     queryRaw.length > 0 || locationRaw.length > 0 || geoIdRaw.length > 0;
 

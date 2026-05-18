@@ -10,7 +10,7 @@
     "start": "node --env-file=../../.env.local dist/index.js",
     "build": "npm run build --workspace=@job-bot/agent-core --prefix ../.. && tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('src/sources/linkedinScrapeInpage.js','dist/sources/linkedinScrapeInpage.js')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/sources/linkedinScrapeInpage.test.js",
+    "test": "node --test src/sources/linkedinScrapeInpage.test.js src/sources/linkedinSearchCriteria.test.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

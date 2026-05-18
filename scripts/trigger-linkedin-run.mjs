@@ -23,7 +23,7 @@
  *   --skip-worker-build   Skip `npm run build --workspace=@job-bot/worker` before importing the worker.
  *   --no-wait             Do not poll Convex until the scrape run reaches a terminal status (exit right after trigger).
  *
- * Location: use either `--location` (free text) or `--geo-id` (LinkedIn numeric geo), never both.
+ * Location: use either `--location` (free text) or `--geo-id` (LinkedIn numeric geo); if both are passed, `--geo-id` wins.
  */
 
 import { execSync } from 'node:child_process';
@@ -261,8 +261,7 @@ async function main() {
     }
 
     if (options.location !== undefined && options.geoId !== undefined) {
-      console.error('Use either --location or --geo-id, not both.');
-      process.exit(1);
+      console.warn('Both --location and --geo-id were set; using --geo-id and ignoring --location.');
     }
 
     /** @type {Record<string, string>} */
@@ -270,11 +269,10 @@ async function main() {
     if (options.query !== undefined) {
       sourceCriteria.search = options.query;
     }
-    if (options.location !== undefined) {
-      sourceCriteria.location = options.location;
-    }
     if (options.geoId !== undefined) {
       sourceCriteria.geoId = options.geoId;
+    } else if (options.location !== undefined) {
+      sourceCriteria.location = options.location;
     }
 
     const payload = {

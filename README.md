@@ -19,7 +19,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 - Sources (`/sources`, `apps/web/src/components/SourcesManager.tsx`) with:
   - source enable/disable
   - read-only accepted criteria fields (code-defined contracts)
-  - source preset management (reusable criteria combinations per source)
+  - source preset management — create, edit, duplicate, and delete reusable criteria combinations per source
 - Convex backend with schema + APIs for:
   - Evaluator management (`convex/evaluators.ts`)
   - Source management (`convex/sources.ts`)
@@ -66,7 +66,7 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `job_sources`: source enablement metadata (`source`, `displayName`, `isEnabled`, optional `defaultEvaluatorId` for ranking when a run has no evaluator)
 - `source_presets`: reusable source criteria combinations (`source`, `name`, `sourceCriteria`)
 - `scrape_runs`: run status, timing, logs summary, aggregate stats
-- `scrape_runs.sourceCriteria`: source-specific run criteria payload (LinkedIn: optional `search`, and either `location` **or** `geoId` — not both; `geoId` is LinkedIn’s numeric geo, digits only)
+- `scrape_runs.sourceCriteria`: source-specific run criteria payload (LinkedIn: optional `search`, and either `location` **or** `geoId`; if both are present, **`geoId` wins** and `location` is dropped; `geoId` is LinkedIn’s numeric geo, digits only)
 - `scrape_runs.linkedinSearchStrategy`: records LinkedIn search path (`ui`, `url_fallback`, `search_url` for direct `/jobs/search/` navigation with `geoId`/keywords, `preferences_hub`)
 - `scrape_runs.usedLinkedinUrlFallback`: boolean warning flag for URL fallback usage
 - `scrape_runs.linkedinFallbackReason`: structured reason when fallback is used

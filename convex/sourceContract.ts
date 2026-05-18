@@ -5,7 +5,7 @@ export const LINKEDIN_SOURCE = 'linkedin';
 export const sourceDefinitions = {
   linkedin: {
     displayName: 'LinkedIn',
-    /** `location` (free text) and `geoId` (LinkedIn numeric geo) are mutually exclusive for one preset/run. */
+    /** `location` (free text) and `geoId` (LinkedIn numeric geo) are mutually exclusive; when both are sent, `geoId` wins. */
     acceptedCriteriaFields: ['search', 'location', 'geoId'],
   },
 } as const;
@@ -19,7 +19,7 @@ export type SourceCriteria = Partial<Record<(typeof sourceDefinitions)[SourceKey
 /**
  * Returns only allowed non-empty criteria fields for a source.
  *
- * For LinkedIn, rejects `location` and `geoId` together and validates `geoId` as digits-only.
+ * For LinkedIn, prefers `geoId` over `location` when both are present and validates `geoId` as digits-only.
  */
 export function normalizeSourceCriteria(
   source: string,
@@ -45,15 +45,12 @@ export function normalizeSourceCriteria(
   }
 
   if (normalizedSource === 'linkedin') {
-    const loc = next.location;
     const gid = next.geoId;
-    if (loc && gid) {
-      throw new Error(
-        'LinkedIn source criteria cannot include both "location" and "geoId". Use one or the other.'
-      );
-    }
-    if (gid && !/^\d+$/.test(gid)) {
-      throw new Error('LinkedIn "geoId" must be a non-empty numeric id (digits only).');
+    if (gid) {
+      if (!/^\d+$/.test(gid)) {
+        throw new Error('LinkedIn "geoId" must be a non-empty numeric id (digits only).');
+      }
+      delete next.location;
     }
   }
 

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
+import { SourceCriteriaFields } from './SourceCriteriaFields.js';
+
 const formatDateTime = (timestamp: number): string => new Date(timestamp).toLocaleString();
 
 type QueuedRun = Doc<'scrape_runs'>;
@@ -302,30 +304,12 @@ export function ScrapeQueuePanel() {
             ))}
           </select>
         </label>
-        <div className='queue-add-linkedin'>
-          {newSourceFields.map((field) => (
-            <label key={field}>
-              {field}
-              <input
-                value={newSourceCriteria[field] ?? ''}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setNewSourceCriteria((prev) => {
-                    const next = { ...prev, [field]: value };
-                    if (field === 'location' && value.trim()) {
-                      next.geoId = '';
-                    }
-                    if (field === 'geoId' && value.trim()) {
-                      next.location = '';
-                    }
-                    return next;
-                  });
-                }}
-                placeholder={`Enter ${field}`}
-              />
-            </label>
-          ))}
-        </div>
+        <SourceCriteriaFields
+          className='queue-add-linkedin'
+          fields={newSourceFields}
+          values={newSourceCriteria}
+          onChange={setNewSourceCriteria}
+        />
       </div>
 
       <div className='table-wrapper'>
@@ -379,29 +363,13 @@ export function ScrapeQueuePanel() {
                       {editSourceFields.length === 0 ? (
                         '—'
                       ) : (
-                        <div className='queue-add-linkedin'>
-                          {editSourceFields.map((field) => (
-                            <input
-                              key={field}
-                              value={editSourceCriteria[field] ?? ''}
-                              onChange={(event) => {
-                                const value = event.target.value;
-                                setEditSourceCriteria((prev) => {
-                                  const next = { ...prev, [field]: value };
-                                  if (field === 'location' && value.trim()) {
-                                    next.geoId = '';
-                                  }
-                                  if (field === 'geoId' && value.trim()) {
-                                    next.location = '';
-                                  }
-                                  return next;
-                                });
-                              }}
-                              aria-label={`Edit ${field}`}
-                              placeholder={field}
-                            />
-                          ))}
-                        </div>
+                        <SourceCriteriaFields
+                          className='queue-add-linkedin'
+                          fields={editSourceFields}
+                          values={editSourceCriteria}
+                          onChange={setEditSourceCriteria}
+                          variant='compact'
+                        />
                       )}
                     </td>
                     <td>

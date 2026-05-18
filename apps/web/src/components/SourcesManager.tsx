@@ -4,6 +4,8 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
+import { SourceCriteriaFields } from './SourceCriteriaFields.js';
+
 type SourceRow = {
   source: string;
   displayName: string;
@@ -34,6 +36,7 @@ export function SourcesManager() {
   const setEnabled = useMutation(api.sources.setEnabled);
   const setDefaultEvaluator = useMutation(api.sources.setDefaultEvaluator);
   const createPreset = useMutation(api.sourcePresets.create);
+  const updatePreset = useMutation(api.sourcePresets.update);
   const removePreset = useMutation(api.sourcePresets.remove);
 
   const source = useMemo(
@@ -42,6 +45,7 @@ export function SourcesManager() {
   );
   const [draftName, setDraftName] = useState('');
   const [draftValues, setDraftValues] = useState<Record<string, string>>({});
+  const [editingPresetId, setEditingPresetId] = useState<Id<'source_presets'> | null>(null);
   const [message, setMessage] = useState('');
 
   const acceptedFields = source?.acceptedCriteriaFields ?? [];
@@ -78,22 +82,44 @@ export function SourcesManager() {
     }
   };
 
-  const onCreatePreset = async () => {
+  const resetPresetDraft = () => {
+    setEditingPresetId(null);
+    setDraftName('');
+    setDraftValues(emptyCriteriaForFields(acceptedFields));
+  };
+
+  const onSavePreset = async () => {
     if (!source) {
       return;
     }
     setMessage('');
+    const name = draftName.trim() || 'Untitled preset';
     try {
-      await createPreset({
-        source: source.source as 'linkedin',
-        name: draftName.trim() || 'Untitled preset',
-        sourceCriteria: draftValues,
-      });
-      setDraftName('');
-      setDraftValues(emptyCriteriaForFields(acceptedFields));
-      setMessage('Preset created.');
+      if (editingPresetId) {
+        await updatePreset({
+          id: editingPresetId,
+          name,
+          sourceCriteria: draftValues,
+        });
+        resetPresetDraft();
+        setMessage('Preset updated.');
+      } else {
+        await createPreset({
+          source: source.source as 'linkedin',
+          name,
+          sourceCriteria: draftValues,
+        });
+        resetPresetDraft();
+        setMessage('Preset created.');
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not create preset.');
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : editingPresetId
+            ? 'Could not update preset.'
+            : 'Could not create preset.'
+      );
     }
   };
 
@@ -105,19 +131,35 @@ export function SourcesManager() {
     setMessage('');
     try {
       await removePreset({ id });
+      if (editingPresetId === id) {
+        resetPresetDraft();
+      }
       setMessage('Preset deleted.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not delete preset.');
     }
   };
 
+  const onEditPreset = (preset: SourcePreset) => {
+    setEditingPresetId(preset._id);
+    setDraftName(preset.name);
+    const next = emptyCriteriaForFields(acceptedFields);
+    for (const field of acceptedFields) {
+      next[field] = preset.sourceCriteria[field] ?? '';
+    }
+    setDraftValues(next);
+    setMessage('');
+  };
+
   const onUsePresetAsDraft = (preset: SourcePreset) => {
+    setEditingPresetId(null);
     setDraftName(`${preset.name} copy`);
     const next = emptyCriteriaForFields(acceptedFields);
     for (const field of acceptedFields) {
       next[field] = preset.sourceCriteria[field] ?? '';
     }
     setDraftValues(next);
+    setMessage('');
   };
 
   return (
@@ -144,6 +186,7 @@ export function SourcesManager() {
                   }
                   onClick={() => {
                     setSelectedSource(row.source);
+                    setEditingPresetId(null);
                     syncDraftFields(row.acceptedCriteriaFields);
                   }}
                 >
@@ -194,31 +237,25 @@ export function SourcesManager() {
                     placeholder='e.g. React Developer in Austin, TX'
                   />
                 </label>
-                {acceptedFields.map((field) => (
-                  <label key={field}>
-                    {field}
-                    <input
-                      value={draftValues[field] ?? ''}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setDraftValues((prev) => {
-                          const next = { ...prev, [field]: value };
-                          if (field === 'location' && value.trim()) {
-                            next.geoId = '';
-                          }
-                          if (field === 'geoId' && value.trim()) {
-                            next.location = '';
-                          }
-                          return next;
-                        });
-                      }}
-                    />
-                  </label>
-                ))}
+                <SourceCriteriaFields
+                  fields={acceptedFields}
+                  values={draftValues}
+                  onChange={setDraftValues}
+                />
+                {editingPresetId ? (
+                  <p className='field-hint full-width'>
+                    Editing preset — changes apply when you click Update preset.
+                  </p>
+                ) : null}
                 <div className='actions full-width'>
-                  <button type='button' onClick={() => void onCreatePreset()}>
-                    Save preset
+                  <button type='button' onClick={() => void onSavePreset()}>
+                    {editingPresetId ? 'Update preset' : 'Save preset'}
                   </button>
+                  {editingPresetId ? (
+                    <button type='button' onClick={resetPresetDraft}>
+                      Cancel
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <div className='table-wrapper'>
@@ -249,6 +286,13 @@ export function SourcesManager() {
                             <td key={`${preset._id}-${field}`}>{preset.sourceCriteria[field] ?? '-'}</td>
                           ))}
                           <td className='queue-actions-cell'>
+                            <button
+                              type='button'
+                              onClick={() => onEditPreset(preset)}
+                              aria-pressed={editingPresetId === preset._id}
+                            >
+                              Edit
+                            </button>
                             <button type='button' onClick={() => onUsePresetAsDraft(preset)}>
                               Duplicate
                             </button>

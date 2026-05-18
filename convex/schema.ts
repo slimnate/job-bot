@@ -33,7 +33,7 @@ export default defineSchema({
     source: v.string(),
     /**
      * Source-specific run criteria (validated by backend source contract).
-     * Example for LinkedIn: { search?, location? } or { search?, geoId? }; do not set both location and geoId.
+     * Example for LinkedIn: { search?, location? } or { search?, geoId? }; when both location and geoId are set, geoId wins.
      */
     sourceCriteria: v.optional(v.record(v.string(), v.string())),
     linkedinSearchStrategy: v.optional(
