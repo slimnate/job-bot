@@ -199,9 +199,19 @@ export function SourcesManager() {
                     {field}
                     <input
                       value={draftValues[field] ?? ''}
-                      onChange={(event) =>
-                        setDraftValues((prev) => ({ ...prev, [field]: event.target.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDraftValues((prev) => {
+                          const next = { ...prev, [field]: value };
+                          if (field === 'location' && value.trim()) {
+                            next.geoId = '';
+                          }
+                          if (field === 'geoId' && value.trim()) {
+                            next.location = '';
+                          }
+                          return next;
+                        });
+                      }}
                     />
                   </label>
                 ))}

@@ -8,7 +8,7 @@ import { ScrapeQueuePanel } from './ScrapeQueuePanel';
 import { WorkerSchedulerPanel } from './WorkerSchedulerPanel';
 
 type RunStatus = '' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-type SearchPathFilter = '' | 'ui' | 'url_fallback' | 'preferences_hub';
+type SearchPathFilter = '' | 'ui' | 'url_fallback' | 'search_url' | 'preferences_hub';
 
 const formatRunDuration = (startedAt: number, endedAt?: number): string => {
   if (!endedAt || endedAt <= startedAt) {
@@ -337,8 +337,14 @@ export function HistoryViewer() {
     if (withSearchTelemetry.linkedinSearchStrategy === 'ui') {
       return 'UI search';
     }
+    if (withSearchTelemetry.linkedinSearchStrategy === 'search_url') {
+      return 'Search URL';
+    }
     if (withSearchTelemetry.linkedinSearchStrategy === 'preferences_hub') {
       return 'Preferences hub';
+    }
+    if (withSearchTelemetry.linkedinSearchStrategy === 'url_fallback') {
+      return 'URL fallback';
     }
     return '-';
   };
@@ -388,6 +394,7 @@ export function HistoryViewer() {
           >
             <option value=''>All search paths</option>
             <option value='ui'>UI search</option>
+            <option value='search_url'>Search URL</option>
             <option value='url_fallback'>URL fallback</option>
             <option value='preferences_hub'>Preferences hub</option>
           </select>

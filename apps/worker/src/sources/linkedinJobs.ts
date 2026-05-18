@@ -663,7 +663,9 @@ export async function collectLinkedInPostings(params: {
 
   const queryRaw = params.sourceCriteria?.search?.trim() ?? '';
   const locationRaw = params.sourceCriteria?.location?.trim() ?? '';
-  const useSearchPath = queryRaw.length > 0 || locationRaw.length > 0;
+  const geoIdRaw = params.sourceCriteria?.geoId?.trim() ?? '';
+  const useSearchPath =
+    queryRaw.length > 0 || locationRaw.length > 0 || geoIdRaw.length > 0;
 
   const autoLogin = parseLinkedInAutoLoginFromEnv(params.env);
   if (autoLogin) {
@@ -737,55 +739,75 @@ export async function collectLinkedInPostings(params: {
 
     await injectOverlayIfNeeded();
 
-    let searchStrategyUsed: 'ui' | 'url_fallback' | 'preferences_hub' = 'preferences_hub';
+    let searchStrategyUsed: 'ui' | 'url_fallback' | 'search_url' | 'preferences_hub' =
+      'preferences_hub';
     let fallbackReason: string | null = null;
 
     if (useSearchPath) {
-      const uiResult = await params.driver.evaluate<LinkedInUiSearchResult>(
-        buildLinkedInApplySearchUiExpression(queryRaw, locationRaw)
-      );
-      if (uiResult.ok) {
-        searchStrategyUsed = 'ui';
-        workerLog.info('linkedin.search_ui', {
-          event: 'linkedin_search_ui_applied',
-          strategyUsed: searchStrategyUsed,
-          keywordSelector: uiResult.keywordSelector ?? null,
-          locationSelector: uiResult.locationSelector ?? null,
-          submitSelector: uiResult.submitSelector ?? null,
-          hasKeywords: queryRaw.length > 0,
-          hasLocation: locationRaw.length > 0,
-        });
-        await sleep(2800);
-        if (isScrapeDebug()) {
-          workerLog.debug('linkedin.milestone', { phase: 'after_search_ui_sleep' });
-        }
-        await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
-      } else {
-        fallbackReason = uiResult.reason ?? 'ui_search_failed';
+      if (geoIdRaw.length > 0) {
         const searchParams = new URLSearchParams();
         if (queryRaw.length > 0) {
           searchParams.set('keywords', queryRaw);
         }
-        if (locationRaw.length > 0) {
-          searchParams.set('location', locationRaw);
-        }
+        searchParams.set('geoId', geoIdRaw);
         const searchUrl = `https://www.linkedin.com/jobs/search/?${searchParams.toString()}`;
-        searchStrategyUsed = 'url_fallback';
-        workerLog.warn('linkedin.search_fallback', {
-          event: 'linkedin_search_fallback_to_url',
+        searchStrategyUsed = 'search_url';
+        workerLog.info('linkedin.search_url', {
+          event: 'linkedin_search_url_navigate',
           strategyUsed: searchStrategyUsed,
-          reason: fallbackReason,
-          selectorAttemptSummary: {
-            keywordSelector: uiResult.keywordSelector ?? null,
-            locationSelector: uiResult.locationSelector ?? null,
-            submitSelector: uiResult.submitSelector ?? null,
-          },
           url: searchUrl,
           hasKeywords: queryRaw.length > 0,
-          hasLocation: locationRaw.length > 0,
+          hasGeoId: true,
         });
         await params.driver.navigate(searchUrl, { timeoutMs: 60_000 });
         await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
+      } else {
+        const uiResult = await params.driver.evaluate<LinkedInUiSearchResult>(
+          buildLinkedInApplySearchUiExpression(queryRaw, locationRaw)
+        );
+        if (uiResult.ok) {
+          searchStrategyUsed = 'ui';
+          workerLog.info('linkedin.search_ui', {
+            event: 'linkedin_search_ui_applied',
+            strategyUsed: searchStrategyUsed,
+            keywordSelector: uiResult.keywordSelector ?? null,
+            locationSelector: uiResult.locationSelector ?? null,
+            submitSelector: uiResult.submitSelector ?? null,
+            hasKeywords: queryRaw.length > 0,
+            hasLocation: locationRaw.length > 0,
+          });
+          await sleep(2800);
+          if (isScrapeDebug()) {
+            workerLog.debug('linkedin.milestone', { phase: 'after_search_ui_sleep' });
+          }
+          await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
+        } else {
+          fallbackReason = uiResult.reason ?? 'ui_search_failed';
+          const searchParams = new URLSearchParams();
+          if (queryRaw.length > 0) {
+            searchParams.set('keywords', queryRaw);
+          }
+          if (locationRaw.length > 0) {
+            searchParams.set('location', locationRaw);
+          }
+          const searchUrl = `https://www.linkedin.com/jobs/search/?${searchParams.toString()}`;
+          searchStrategyUsed = 'url_fallback';
+          workerLog.warn('linkedin.search_fallback', {
+            event: 'linkedin_search_fallback_to_url',
+            strategyUsed: searchStrategyUsed,
+            reason: fallbackReason,
+            selectorAttemptSummary: {
+              keywordSelector: uiResult.keywordSelector ?? null,
+              locationSelector: uiResult.locationSelector ?? null,
+              submitSelector: uiResult.submitSelector ?? null,
+            },
+            url: searchUrl,
+            hasKeywords: queryRaw.length > 0,
+            hasLocation: locationRaw.length > 0,
+          });
+          await params.driver.navigate(searchUrl, { timeoutMs: 60_000 });
+          await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
+        }
       }
     } else {
       if (steppingEnabled) {

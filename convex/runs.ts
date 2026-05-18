@@ -244,7 +244,12 @@ export const updateStatus = mutation({
     errorMessage: v.optional(v.string()),
     endedAt: v.optional(v.number()),
     linkedinSearchStrategy: v.optional(
-      v.union(v.literal('ui'), v.literal('url_fallback'), v.literal('preferences_hub'))
+      v.union(
+        v.literal('ui'),
+        v.literal('url_fallback'),
+        v.literal('search_url'),
+        v.literal('preferences_hub')
+      )
     ),
     usedLinkedinUrlFallback: v.optional(v.boolean()),
     linkedinFallbackReason: v.optional(v.string()),

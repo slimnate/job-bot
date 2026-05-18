@@ -16,11 +16,14 @@
  *   node --env-file=.env.local scripts/trigger-linkedin-run.mjs
  *   npm run trigger:linkedin -- --query "optional keywords"
  *   npm run trigger:linkedin -- --query "optional keywords" --location "Austin, TX"
+ *   npm run trigger:linkedin -- --query "optional keywords" --geo-id 90000096
  *
  * Flags:
  *   --no-start-worker     Do not import/start the worker; only queue + POST /trigger (needs a worker elsewhere).
  *   --skip-worker-build   Skip `npm run build --workspace=@job-bot/worker` before importing the worker.
  *   --no-wait             Do not poll Convex until the scrape run reaches a terminal status (exit right after trigger).
+ *
+ * Location: use either `--location` (free text) or `--geo-id` (LinkedIn numeric geo), never both.
  */
 
 import { execSync } from 'node:child_process';
@@ -41,7 +44,7 @@ const REPO_ROOT = join(__dirname, '..');
 const WORKER_DIST_INDEX = join(REPO_ROOT, 'apps/worker/dist/index.js');
 
 function parseArgs(argv) {
-  /** @type {{ query?: string; location?: string; noStartWorker: boolean; skipWorkerBuild: boolean; noWait: boolean }} */
+  /** @type {{ query?: string; location?: string; geoId?: string; noStartWorker: boolean; skipWorkerBuild: boolean; noWait: boolean }} */
   const out = { noStartWorker: false, skipWorkerBuild: false, noWait: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--query' && argv[i + 1] !== undefined) {
@@ -49,6 +52,9 @@ function parseArgs(argv) {
       i++;
     } else if (argv[i] === '--location' && argv[i + 1] !== undefined) {
       out.location = argv[i + 1];
+      i++;
+    } else if (argv[i] === '--geo-id' && argv[i + 1] !== undefined) {
+      out.geoId = argv[i + 1];
       i++;
     } else if (argv[i] === '--no-start-worker') {
       out.noStartWorker = true;
@@ -254,10 +260,26 @@ async function main() {
       console.log('Worker trigger already reachable; using existing worker process.');
     }
 
+    if (options.location !== undefined && options.geoId !== undefined) {
+      console.error('Use either --location or --geo-id, not both.');
+      process.exit(1);
+    }
+
+    /** @type {Record<string, string>} */
+    const sourceCriteria = {};
+    if (options.query !== undefined) {
+      sourceCriteria.search = options.query;
+    }
+    if (options.location !== undefined) {
+      sourceCriteria.location = options.location;
+    }
+    if (options.geoId !== undefined) {
+      sourceCriteria.geoId = options.geoId;
+    }
+
     const payload = {
       source: 'linkedin',
-      ...(options.query !== undefined ? { linkedinSearchQuery: options.query } : {}),
-      ...(options.location !== undefined ? { linkedinLocation: options.location } : {}),
+      ...(Object.keys(sourceCriteria).length > 0 ? { sourceCriteria } : {}),
     };
 
     const result = await client.mutation(api.runs.trigger, payload);

@@ -33,11 +33,16 @@ export default defineSchema({
     source: v.string(),
     /**
      * Source-specific run criteria (validated by backend source contract).
-     * Example for LinkedIn: { search?: string, location?: string }.
+     * Example for LinkedIn: { search?, location? } or { search?, geoId? }; do not set both location and geoId.
      */
     sourceCriteria: v.optional(v.record(v.string(), v.string())),
     linkedinSearchStrategy: v.optional(
-      v.union(v.literal('ui'), v.literal('url_fallback'), v.literal('preferences_hub'))
+      v.union(
+        v.literal('ui'),
+        v.literal('url_fallback'),
+        v.literal('search_url'),
+        v.literal('preferences_hub')
+      )
     ),
     usedLinkedinUrlFallback: v.optional(v.boolean()),
     linkedinFallbackReason: v.optional(v.string()),
@@ -124,7 +129,7 @@ export default defineSchema({
 
   /**
    * User-managed reusable criteria combinations for a source.
-   * For LinkedIn: sourceCriteria supports keys `search` and `location`.
+   * For LinkedIn: `search`, and either `location` (text) or `geoId` (numeric), not both.
    */
   source_presets: defineTable({
     source: v.string(),

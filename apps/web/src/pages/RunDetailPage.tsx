@@ -52,12 +52,16 @@ export function RunDetailPage() {
             if (!withSearchTelemetry.linkedinSearchStrategy && !withSearchTelemetry.usedLinkedinUrlFallback) {
               return null;
             }
+            const strategyLabel =
+              withSearchTelemetry.linkedinSearchStrategy === 'search_url'
+                ? 'Search URL'
+                : withSearchTelemetry.linkedinSearchStrategy;
             return (
               <p>
                 <span className='run-detail-label'>Search path</span>{' '}
                 {withSearchTelemetry.usedLinkedinUrlFallback
                   ? `URL fallback used${withSearchTelemetry.linkedinFallbackReason ? ` (${withSearchTelemetry.linkedinFallbackReason})` : ''}`
-                  : withSearchTelemetry.linkedinSearchStrategy}
+                  : strategyLabel}
               </p>
             );
           })()}

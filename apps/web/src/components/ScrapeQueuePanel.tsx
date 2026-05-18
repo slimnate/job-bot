@@ -308,9 +308,19 @@ export function ScrapeQueuePanel() {
               {field}
               <input
                 value={newSourceCriteria[field] ?? ''}
-                onChange={(event) =>
-                  setNewSourceCriteria((prev) => ({ ...prev, [field]: event.target.value }))
-                }
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setNewSourceCriteria((prev) => {
+                    const next = { ...prev, [field]: value };
+                    if (field === 'location' && value.trim()) {
+                      next.geoId = '';
+                    }
+                    if (field === 'geoId' && value.trim()) {
+                      next.location = '';
+                    }
+                    return next;
+                  });
+                }}
                 placeholder={`Enter ${field}`}
               />
             </label>
@@ -374,9 +384,19 @@ export function ScrapeQueuePanel() {
                             <input
                               key={field}
                               value={editSourceCriteria[field] ?? ''}
-                              onChange={(event) =>
-                                setEditSourceCriteria((prev) => ({ ...prev, [field]: event.target.value }))
-                              }
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setEditSourceCriteria((prev) => {
+                                  const next = { ...prev, [field]: value };
+                                  if (field === 'location' && value.trim()) {
+                                    next.geoId = '';
+                                  }
+                                  if (field === 'geoId' && value.trim()) {
+                                    next.location = '';
+                                  }
+                                  return next;
+                                });
+                              }}
                               aria-label={`Edit ${field}`}
                               placeholder={field}
                             />
