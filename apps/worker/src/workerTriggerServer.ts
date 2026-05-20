@@ -2,6 +2,7 @@ import http from 'node:http';
 
 import { workerLog } from './log.js';
 import type { WorkerScheduler } from './scheduler.js';
+import { handleIngestPostingRequest } from './workerIngestPostingHandler.js';
 import { handleRankPostingRequest, handleRankPostingsRequest } from './workerRankPostingHandler.js';
 
 const corsTrigger: Record<string, string> = {
@@ -17,7 +18,8 @@ const corsJson: Record<string, string> = {
 
 /**
  * Local-only HTTP trigger: `GET /scheduler` returns scheduler JSON; `POST /trigger` runs one scheduler tick;
- * `POST /rank-posting` scores one posting and `POST /rank-postings` scores multiple postings in one batch via Cursor CLI.
+ * `POST /rank-posting` scores one posting and `POST /rank-postings` scores multiple postings in one batch via Cursor CLI;
+ * `POST /ingest-posting` upserts captured job postings (e.g. from the oc-job-capture browser extension).
  * Binds `127.0.0.1` only.
  */
 export function startWorkerTriggerServer(
@@ -31,7 +33,8 @@ export function startWorkerTriggerServer(
       (req.url === '/trigger' ||
         req.url === '/scheduler' ||
         req.url === '/rank-posting' ||
-        req.url === '/rank-postings')
+        req.url === '/rank-postings' ||
+        req.url === '/ingest-posting')
     ) {
       res.writeHead(204, corsTrigger);
       res.end();
@@ -69,6 +72,10 @@ export function startWorkerTriggerServer(
       void handleRankPostingsRequest({ convexUrl: options.convexUrl, req, res });
       return;
     }
+    if (req.method === 'POST' && req.url === '/ingest-posting') {
+      void handleIngestPostingRequest({ convexUrl: options.convexUrl, req, res });
+      return;
+    }
     res.writeHead(404, corsTrigger);
     res.end();
   });
@@ -76,7 +83,7 @@ export function startWorkerTriggerServer(
   server.listen(port, '127.0.0.1', () => {
     workerLog.info('worker.trigger_http', {
       port,
-      paths: ['/scheduler', '/trigger', '/rank-posting', '/rank-postings'],
+      paths: ['/scheduler', '/trigger', '/rank-posting', '/rank-postings', '/ingest-posting'],
       bind: '127.0.0.1',
     });
   });
