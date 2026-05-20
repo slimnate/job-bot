@@ -85,7 +85,10 @@ export function PostingViewer() {
       if (prev && llmCatalog.some((p) => p.key === prev)) {
         return prev;
       }
-      return llmCatalog[0]!.key;
+      const cursorProvider = llmCatalog.find(
+        (p) => p.key === 'cursor' || p.surface === 'worker_cursor'
+      );
+      return cursorProvider?.key ?? llmCatalog[0]!.key;
     });
   }, [scoreTargets, llmCatalog]);
 

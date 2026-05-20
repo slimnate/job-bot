@@ -12,4 +12,4 @@ Always be sure to include human readable documentation in the form of function c
 
 Always be sure to update the README.md with relevant information any time you make code changes, when necessary for the end user or developer. Document edge cases here as well.
 
-If I referece a plan in an agent that didn't create it, make sure ou update the plan steps as you implement
+If I referece a plan in an agent that didn't create it, make sure to update the plan steps as you implement
