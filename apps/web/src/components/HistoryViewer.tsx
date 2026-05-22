@@ -437,7 +437,15 @@ export function HistoryViewer() {
                         ? `disc ${run.stats.discoveredCount}, ins ${run.stats.insertedCount}, rank ${run.stats.rankedCount}`
                         : '-'}
                     </td>
-                    <td>{run.errorMessage ?? '-'}</td>
+                    <td className='history-error-cell'>
+                      {run.errorMessage ? (
+                        <span className='history-error-cell__text' title={run.errorMessage}>
+                          {run.errorMessage}
+                        </span>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
                     <td className='queue-actions-cell'>
                       <button type='button' onClick={() => setSelectedRunId(run._id)}>
                         Logs

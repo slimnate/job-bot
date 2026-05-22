@@ -1,3 +1,5 @@
+import { CURSOR_CLI_CATALOG } from '@job-bot/shared';
+
 import { mutation, query } from './_generated/server.js';
 import { v } from 'convex/values';
 
@@ -108,5 +110,70 @@ export const replaceCatalog = mutation({
     }
 
     return { providerCount: args.providers.length, modelCount: args.models.length };
+  },
+});
+
+/**
+ * One-time / repeatable seed: deletes every `ranking_llm_models` row for provider `cursor`,
+ * then inserts the full Cursor CLI catalog from `@job-bot/shared`. OpenAI rows are untouched.
+ *
+ * Run manually after deploy:
+ *   npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog
+ */
+export const seedCursorCliModelsCatalog = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const providerKey = 'cursor';
+    const now = Date.now();
+
+    const existing = await ctx.db
+      .query('ranking_llm_models')
+      .withIndex('by_provider_key', (q) => q.eq('providerKey', providerKey))
+      .collect();
+
+    for (const row of existing) {
+      await ctx.db.delete(row._id);
+    }
+
+    const providerRow = await ctx.db
+      .query('ranking_llm_providers')
+      .withIndex('by_key', (q) => q.eq('key', providerKey))
+      .unique();
+
+    if (providerRow) {
+      await ctx.db.patch(providerRow._id, {
+        displayName: 'Cursor CLI',
+        surface: 'worker_cursor',
+        sortOrder: 1,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert('ranking_llm_providers', {
+        key: providerKey,
+        displayName: 'Cursor CLI',
+        surface: 'worker_cursor',
+        sortOrder: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    for (let i = 0; i < CURSOR_CLI_CATALOG.length; i++) {
+      const entry = CURSOR_CLI_CATALOG[i]!;
+      await ctx.db.insert('ranking_llm_models', {
+        providerKey,
+        apiModelId: entry.apiModelId,
+        displayName: entry.displayName,
+        sortOrder: i,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    return {
+      providerKey,
+      deletedCount: existing.length,
+      modelCount: CURSOR_CLI_CATALOG.length,
+    };
   },
 });

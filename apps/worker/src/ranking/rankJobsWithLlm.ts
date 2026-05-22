@@ -1,24 +1,65 @@
 import type { Doc, Id } from '../convexBridge/doc.js';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  buildCursorFileRankingPrompt,
+  buildRankingPrompt,
+  cursorBatchPaths,
+  extractRankingJsonFromText,
+  rankingJsonSchema,
+  RANKING_SYSTEM_MESSAGE,
+  validateIndividualScores,
+  validateRankingResults,
+  type RankingCandidateInput,
+  type RankingEvaluatorInput,
+  type RankingResult,
+} from '@job-bot/shared';
 
 import { isRankDebug } from '../debugFlags.js';
 import { workerLog } from '../log.js';
 import { withRetry } from '../retry.js';
+import {
+  CURSOR_PROMPT_FILE_THRESHOLD_CHARS,
+  isCursorBatchFilesEnabled,
+  isCursorCliOutputLogEnabled,
+  isCursorInlinePromptForced,
+  isCursorMinimalContextEnabled,
+  loadCursorFileExtraTimeoutMs,
+  loadRankingBaseTimeoutMs,
+  loadRankingPromptOptions,
+  loadRankingTimeoutPerCandidateMs,
+  shouldKeepCursorBatchFiles,
+  type RankingProviderKind,
+} from './rankingEnv.js';
+import { writeCursorRankingBatchFiles } from './cursorBatchFiles.js';
+import {
+  buildCursorCliArgs,
+  formatCursorCliFailure,
+  resolveCursorApiModelId,
+  runCursorCli,
+  type CursorCliConfig,
+  type CursorCliOutputLineHandler,
+} from './cursorCli.js';
+
+/**
+ * Logs each `cursor-agent` stdout/stderr line when `LLM_RANKING_CURSOR_LOG_OUTPUT` is enabled.
+ */
+function createCursorCliOutputLogger(): CursorCliOutputLineHandler | undefined {
+  if (!isCursorCliOutputLogEnabled()) {
+    return undefined;
+  }
+  return (stream, line) => {
+    workerLog.debug('llm.rank.cursor_cli.output', { stream, line });
+  };
+}
 
 export type LlmRankingCandidate = Pick<
   Doc<'job_postings'>,
   '_id' | 'title' | 'company' | 'location' | 'salaryText' | 'descriptionSnippet' | 'postedAt' | 'url' | 'source'
 >;
-
-type RankingResult = {
-  postingId: Id<'job_postings'>;
-  rank: number;
-  scoreOverall: number;
-  reasoningSummary: string;
-  criteriaMatch: Record<string, unknown>;
-  redFlags: string[];
-};
 
 type LlmRequestPayload = {
   evaluator: Doc<'job_evaluators'> | null;
@@ -34,41 +75,6 @@ type LlmClientConfig = {
   model: string;
   temperature: number;
 };
-
-type RankingProvider = 'cursor' | 'http';
-
-type CursorCliConfig = {
-  command: string;
-  args: string[];
-  timeoutMs: number;
-  model: string;
-};
-
-const execFileAsync = promisify(execFile);
-
-const rankingJsonSchema = {
-  name: 'job_ranking_results',
-  schema: {
-    type: 'array',
-    items: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['postingId', 'rank', 'scoreOverall', 'reasoningSummary', 'criteriaMatch', 'redFlags'],
-      properties: {
-        postingId: { type: 'string' },
-        rank: { type: 'integer', minimum: 1 },
-        scoreOverall: { type: 'number', minimum: 0, maximum: 100 },
-        reasoningSummary: { type: 'string' },
-        criteriaMatch: { type: 'object', additionalProperties: true },
-        redFlags: {
-          type: 'array',
-          items: { type: 'string' },
-        },
-      },
-    },
-  },
-  strict: true,
-} as const;
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -94,7 +100,7 @@ function parseArgs(input: string): string[] {
   });
 }
 
-function resolveProvider(): RankingProvider {
+function resolveProvider(): RankingProviderKind {
   const raw = process.env.LLM_RANKING_PROVIDER?.trim().toLowerCase();
   if (raw === 'cursor' || raw === 'http') {
     return raw;
@@ -121,139 +127,74 @@ function loadLlmConfig(modelOverride?: string): LlmClientConfig {
   };
 }
 
-function loadCursorCliConfig(modelOverride?: string): CursorCliConfig {
-  const timeoutRaw = Number(process.env.LLM_RANKING_TIMEOUT_MS ?? '60000');
-  const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 60000;
+function defaultRankingCliWorkspace(): string {
+  const workerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  return join(workerRoot, 'ranking-cli-workspace');
+}
 
+function loadCursorCliConfig(modelOverride?: string): CursorCliConfig {
   return {
     command: process.env.CURSOR_CLI_COMMAND?.trim() || 'cursor-agent',
-    args: parseArgs(process.env.CURSOR_CLI_ARGS ?? '--print'),
-    timeoutMs,
-    model: modelOverride ?? process.env.LLM_RANKING_MODEL ?? 'cursor-default',
+    args: parseArgs(process.env.CURSOR_CLI_ARGS ?? '--print --mode=ask --trust --output-format text'),
+    timeoutMs: loadRankingBaseTimeoutMs(),
+    model: resolveCursorApiModelId(modelOverride),
+    workspaceDir: process.env.CURSOR_CLI_WORKSPACE?.trim() || defaultRankingCliWorkspace(),
   };
 }
 
-function strTrim(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
-function buildPrompt(payload: LlmRequestPayload): string {
-  const c = payload.evaluator;
-  const profileName = strTrim(c?.name);
-  const rankingPrompt = strTrim(c?.rankingPrompt);
-  const resumeMarkdown = strTrim(c?.resumeMarkdown);
-
-  const sections: string[] = [
-    'Evaluator context:',
-    profileName.length > 0 ? `- Profile name: ${profileName}` : '- Profile name: (not provided)',
-    rankingPrompt.length > 0 ? `- User ranking instructions: ${rankingPrompt}` : '- User ranking instructions: (not provided)',
-    resumeMarkdown.length > 0 ? `- Resume markdown:\n${resumeMarkdown}` : '- Resume markdown: (not provided)',
-    '',
-    'You rank job postings for this single user profile.',
-    'Return JSON only. Do not include markdown.',
-    'Output requirements:',
-    '- Return one object per input posting, with no omissions and no extras.',
-    '- Use the exact postingId values from input.',
-    '- rank must be 1..N with no duplicates (1 is best fit).',
-    '- scoreOverall is 0..100.',
-    '- reasoningSummary is concise and specific.',
-    '- criteriaMatch is an object describing matched and unmet criteria.',
-    '- redFlags is an array of strings and can be empty.',
-    '',
-  ];
-
-  sections.push('Postings to rank:');
-  for (const [index, candidate] of payload.candidates.entries()) {
-    sections.push(
-      `Posting ${index + 1}:`,
-      JSON.stringify({
-        postingId: candidate._id,
-        title: candidate.title,
-        company: candidate.company,
-        location: candidate.location ?? null,
-        salaryText: candidate.salaryText ?? null,
-        postedAt: candidate.postedAt ?? null,
-        source: candidate.source,
-        url: candidate.url,
-        descriptionSnippet: candidate.descriptionSnippet ?? null,
-      }),
-      ''
-    );
-  }
-  sections.push('Rank each posting and return one JSON list containing all results.');
-
-  return sections.join('\n');
+function requiredString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+function toRankingEvaluator(evaluator: Doc<'job_evaluators'> | null): RankingEvaluatorInput {
+  if (!evaluator) {
     return null;
   }
-  return value as Record<string, unknown>;
-}
-
-function validateRankingResult(value: unknown): RankingResult | null {
-  const record = asRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const postingId = record.postingId;
-  const rank = record.rank;
-  const scoreOverall = record.scoreOverall;
-  const reasoningSummary = record.reasoningSummary;
-  const criteriaMatch = record.criteriaMatch;
-  const redFlags = record.redFlags;
-
-  if (typeof postingId !== 'string' || postingId.length === 0) {
-    return null;
-  }
-  if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 1) {
-    return null;
-  }
-  if (typeof scoreOverall !== 'number' || scoreOverall < 0 || scoreOverall > 100) {
-    return null;
-  }
-  if (typeof reasoningSummary !== 'string' || reasoningSummary.trim().length === 0) {
-    return null;
-  }
-  if (!criteriaMatch || typeof criteriaMatch !== 'object' || Array.isArray(criteriaMatch)) {
-    return null;
-  }
-  if (!Array.isArray(redFlags) || redFlags.some((entry) => typeof entry !== 'string')) {
-    return null;
-  }
-
   return {
-    postingId: postingId as Id<'job_postings'>,
-    rank,
-    scoreOverall,
-    reasoningSummary: reasoningSummary.trim(),
-    criteriaMatch: criteriaMatch as Record<string, unknown>,
-    redFlags,
+    name: optionalString(evaluator.name),
+    rankingPrompt: optionalString(evaluator.rankingPrompt),
+    resumeMarkdown: optionalString(evaluator.resumeMarkdown),
   };
 }
 
-function validateRankingResults(value: unknown): RankingResult[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const parsed: RankingResult[] = [];
-  for (const item of value) {
-    const result = validateRankingResult(item);
-    if (!result) {
-      return null;
-    }
-    parsed.push(result);
-  }
-
-  return parsed;
+function toRankingCandidates(candidates: LlmRankingCandidate[]): RankingCandidateInput[] {
+  return candidates.map((candidate) => ({
+    _id: requiredString(candidate._id),
+    title: requiredString(candidate.title),
+    company: requiredString(candidate.company),
+    location: optionalString(candidate.location),
+    salaryText: optionalString(candidate.salaryText),
+    descriptionSnippet: optionalString(candidate.descriptionSnippet),
+    postedAt:
+      candidate.postedAt != null && candidate.postedAt !== ''
+        ? String(candidate.postedAt)
+        : undefined,
+    url: requiredString(candidate.url),
+    source: requiredString(candidate.source),
+  }));
 }
 
-async function callLlmForRankings(
-  payload: LlmRequestPayload,
-  config: LlmClientConfig
+function rankingTimeoutMs(baseMs: number, candidateCount: number, extraMs = 0): number {
+  return baseMs + candidateCount * loadRankingTimeoutPerCandidateMs() + extraMs;
+}
+
+async function writePromptTempFile(prompt: string): Promise<string> {
+  const dir = join(tmpdir(), 'job-bot-ranking');
+  await mkdir(dir, { recursive: true });
+  const filePath = join(dir, `prompt-${Date.now()}.txt`);
+  await writeFile(filePath, prompt, 'utf8');
+  return filePath;
+}
+
+async function callLlmForOnePosting(
+  evaluator: RankingEvaluatorInput,
+  candidate: RankingCandidateInput,
+  config: LlmClientConfig,
+  promptOptions: ReturnType<typeof loadRankingPromptOptions>
 ): Promise<RankingResult[] | null> {
   return withRetry(
     async () => {
@@ -267,14 +208,10 @@ async function callLlmForRankings(
           model: config.model,
           temperature: config.temperature,
           messages: [
-            {
-              role: 'system',
-              content:
-                'You are a strict ranking engine that only returns valid JSON matching the provided schema.',
-            },
+            { role: 'system', content: RANKING_SYSTEM_MESSAGE },
             {
               role: 'user',
-              content: buildPrompt(payload),
+              content: buildRankingPrompt(evaluator, [candidate], promptOptions),
             },
           ],
           response_format: {
@@ -297,12 +234,8 @@ async function callLlmForRankings(
         return null;
       }
 
-      try {
-        const parsed = JSON.parse(content) as unknown;
-        return validateRankingResults(parsed);
-      } catch {
-        return null;
-      }
+      const parsed = JSON.parse(content) as unknown;
+      return validateRankingResults(parsed);
     },
     {
       maxAttempts: 3,
@@ -314,73 +247,230 @@ async function callLlmForRankings(
   );
 }
 
+async function cleanupCursorBatch(workspaceDir: string, batchId: string): Promise<void> {
+  if (shouldKeepCursorBatchFiles()) {
+    return;
+  }
+  const paths = cursorBatchPaths(batchId);
+  await rm(join(workspaceDir, paths.batchDir), { recursive: true, force: true });
+}
+
 async function callCursorCliForRankings(
-  payload: LlmRequestPayload,
+  evaluator: RankingEvaluatorInput,
+  candidates: RankingCandidateInput[],
   config: CursorCliConfig,
   forceJsonReminder: boolean
 ): Promise<RankingResult[] | null> {
-  const prompt = forceJsonReminder
-    ? `${buildPrompt(payload)}\nIMPORTANT: Output must be strict JSON only. No prose, no markdown, no code fences.`
-    : buildPrompt(payload);
+  const batchId = `batch-${Date.now()}`;
+  const useBatchFiles = isCursorBatchFilesEnabled() && !isCursorInlinePromptForced();
 
-  const args =
-    config.args.some((arg) => arg.includes('{prompt}'))
-      ? config.args.map((arg) => arg.replaceAll('{prompt}', prompt))
-      : [...config.args, prompt];
+  let prompt: string;
+  if (useBatchFiles) {
+    await writeCursorRankingBatchFiles(config.workspaceDir, batchId, evaluator, candidates);
+    prompt = buildCursorFileRankingPrompt(
+      batchId,
+      candidates.map((c) => c._id)
+    );
+    if (forceJsonReminder) {
+      prompt += '\nIMPORTANT: Output must be strict JSON only. No prose, no markdown, no code fences.';
+    }
+  } else {
+    const body = buildRankingPrompt(evaluator, candidates, {
+      descriptionMaxChars: Number.MAX_SAFE_INTEGER,
+      omitUrl: true,
+    });
+    prompt = [
+      'Score each posting independently. Return JSON only.',
+      forceJsonReminder
+        ? 'IMPORTANT: Output must be strict JSON only. No prose, no markdown, no code fences.'
+        : '',
+      body,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  let args: string[];
+  if (
+    !useBatchFiles &&
+    prompt.length > CURSOR_PROMPT_FILE_THRESHOLD_CHARS &&
+    config.args.some((a) => a.includes('{prompt}'))
+  ) {
+    const filePath = await writePromptTempFile(prompt);
+    args = config.args.map((arg) => arg.replaceAll('{prompt}', filePath));
+  } else {
+    args = buildCursorCliArgs(config, prompt, {
+      minimalContext: isCursorMinimalContextEnabled(),
+    });
+  }
+
+  const extraTimeout = useBatchFiles ? loadCursorFileExtraTimeoutMs() : 0;
+  const timeoutMs = rankingTimeoutMs(config.timeoutMs, candidates.length, extraTimeout);
 
   try {
-    const { stdout, stderr } = await execFileAsync(config.command, args, {
-      timeout: config.timeoutMs,
-      maxBuffer: 1024 * 1024 * 8,
-      env: process.env,
+    await mkdir(config.workspaceDir, { recursive: true });
+    const { stdout, stderr } = await runCursorCli({
+      config,
+      args,
+      prompt,
+      timeoutMs,
+      cwd: config.workspaceDir,
+      onOutputLine: createCursorCliOutputLogger(),
+      onSpawn: isCursorCliOutputLogEnabled()
+        ? ({ commandLine, timeoutMs: cliTimeoutMs, cwd: cliCwd }) => {
+            workerLog.debug('llm.rank.cursor_cli.spawn', {
+              command: commandLine,
+              timeoutMs: cliTimeoutMs,
+              cwd: cliCwd,
+            });
+          }
+        : undefined,
     });
 
-    const text = (stdout ?? '').trim();
+    const text = stdout.trim();
     if (!text) {
-      if ((stderr ?? '').trim()) {
-        return null;
-      }
-      return null;
+      throw new Error(
+        formatCursorCliFailure({
+          reason: 'Cursor CLI produced empty stdout.',
+          command: config.command,
+          args,
+          prompt,
+          stderr,
+          stdout,
+        })
+      );
     }
 
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      return validateRankingResults(parsed);
-    } catch {
-      return null;
+    const parsed = extractRankingJsonFromText(text);
+    if (parsed == null) {
+      throw new Error(
+        formatCursorCliFailure({
+          reason: 'Could not parse a JSON score array from Cursor CLI stdout.',
+          command: config.command,
+          args,
+          prompt,
+          stderr,
+          stdout: text,
+        })
+      );
     }
+
+    const validated = validateRankingResults(parsed);
+    if (!validated) {
+      throw new Error(
+        formatCursorCliFailure({
+          reason: 'Cursor CLI JSON did not match the expected scoring schema.',
+          command: config.command,
+          args,
+          prompt,
+          stderr,
+          stdout: text,
+        })
+      );
+    }
+
+    return validated;
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown Cursor CLI execution error';
-    const hint =
-      /enoent|spawn/i.test(message)
-        ? ' Install the Cursor CLI, set CURSOR_CLI_COMMAND to the full path of the agent binary, or use LLM_RANKING_PROVIDER=http with OPENAI_API_KEY.'
-        : '';
-    throw new Error(`Cursor CLI ranking failed: ${message}.${hint}`);
+    if (error instanceof Error) {
+      workerLog.error('llm.rank.cursor_cli_failed', {
+        message: error.message,
+        model: config.model,
+        candidateCount: candidates.length,
+      });
+    }
+    throw error;
+  } finally {
+    if (useBatchFiles) {
+      await cleanupCursorBatch(config.workspaceDir, batchId);
+    }
   }
 }
 
-function ensureAllCandidatesRanked(
-  candidates: LlmRankingCandidate[],
-  rankings: RankingResult[]
-): RankingResult[] | null {
-  const candidateIds = new Set(candidates.map((candidate) => candidate._id));
-  const seen = new Set<string>();
-  for (const ranking of rankings) {
-    if (!candidateIds.has(ranking.postingId)) {
-      return null;
+/**
+ * Scores postings with retries; validates one result per candidate.
+ */
+async function scoreWithRetries(params: {
+  provider: RankingProviderKind;
+  evaluator: RankingEvaluatorInput;
+  candidates: RankingCandidateInput[];
+  httpConfig: LlmClientConfig | null;
+  cursorConfig: CursorCliConfig | null;
+  promptOptions: ReturnType<typeof loadRankingPromptOptions>;
+}): Promise<RankingResult[] | null> {
+  const { provider, evaluator, candidates, httpConfig, cursorConfig, promptOptions } = params;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    if (isRankDebug()) {
+      workerLog.debug('llm.rank.attempt', {
+        provider,
+        attempt,
+        candidateCount: candidates.length,
+      });
     }
-    seen.add(ranking.postingId);
-  }
-  if (seen.size !== candidates.length) {
-    return null;
+
+    let parsed: RankingResult[] | null = null;
+
+    if (provider === 'cursor' && cursorConfig) {
+      parsed = await callCursorCliForRankings(evaluator, candidates, cursorConfig, attempt === 2);
+    } else if (provider === 'http' && httpConfig) {
+      const flat: RankingResult[] = [];
+      for (let i = 0; i < candidates.length; i += 1) {
+        const candidate = candidates[i]!;
+        const one = await callLlmForOnePosting(evaluator, candidate, httpConfig, promptOptions);
+        if (!one) {
+          workerLog.warn('llm.rank.posting_failed', {
+            provider,
+            postingId: candidate._id,
+            index: i + 1,
+            total: candidates.length,
+          });
+          parsed = null;
+          break;
+        }
+        const validated = validateIndividualScores([candidate], one);
+        if (!validated) {
+          parsed = null;
+          break;
+        }
+        flat.push(...validated);
+        if (isRankDebug()) {
+          workerLog.debug('llm.rank.posting_scored', {
+            provider,
+            postingId: candidate._id,
+            index: i + 1,
+            total: candidates.length,
+            scoreOverall: validated[0]?.scoreOverall,
+          });
+        }
+      }
+      parsed = flat.length === candidates.length ? flat : null;
+    }
+
+    if (!parsed) {
+      workerLog.warn('llm.rank.attempt_invalid', {
+        provider,
+        attempt,
+        reason: 'empty_or_unparseable',
+      });
+      if (attempt === 2) {
+        break;
+      }
+      continue;
+    }
+
+    const normalized = validateIndividualScores(candidates, parsed);
+    if (normalized) {
+      return normalized;
+    }
+
+    workerLog.warn('llm.rank.attempt_invalid', {
+      provider,
+      attempt,
+      reason: 'schema_or_candidate_mismatch',
+    });
   }
 
-  return [...rankings]
-    .sort((a, b) => a.rank - b.rank)
-    .map((ranking, index) => ({
-      ...ranking,
-      rank: index + 1,
-    }));
+  return null;
 }
 
 export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
@@ -397,75 +487,52 @@ export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
   const provider = payload.provider ?? resolveProvider();
   const httpConfig = provider === 'http' ? loadLlmConfig(payload.model) : null;
   const cursorConfig = provider === 'cursor' ? loadCursorCliConfig(payload.model) : null;
+  const promptOptions = loadRankingPromptOptions();
+  const evaluator = toRankingEvaluator(payload.evaluator);
+  const candidates = toRankingCandidates(payload.candidates);
 
   workerLog.info('llm.rank.start', {
     provider,
     candidateCount: payload.candidates.length,
+    requestCount: provider === 'http' ? candidates.length : 1,
     model: payload.model,
+    cursorBatchFiles:
+      provider === 'cursor' ? isCursorBatchFilesEnabled() && !isCursorInlinePromptForced() : false,
   });
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    if (isRankDebug()) {
-      workerLog.debug('llm.rank.attempt', {
-        provider,
-        attempt,
-        candidateCount: payload.candidates.length,
-      });
-    }
-    const parsed =
-      provider === 'cursor' && cursorConfig
-        ? await callCursorCliForRankings(payload, cursorConfig, attempt === 2)
-        : await callLlmForRankings(payload, httpConfig as LlmClientConfig);
-    if (!parsed) {
-      workerLog.warn('llm.rank.attempt_invalid', {
-        provider,
-        attempt,
-        reason: 'empty_or_unparseable',
-      });
-      if (attempt === 2) {
-        break;
-      }
-      continue;
-    }
+  const rankings = await scoreWithRetries({
+    provider,
+    evaluator,
+    candidates,
+    httpConfig,
+    cursorConfig,
+    promptOptions,
+  });
 
-    if (isRankDebug()) {
-      workerLog.debug('llm.rank.parsed', {
-        provider,
-        attempt,
-        rawRankingsCount: parsed.length,
-      });
-    }
-
-    const normalized = ensureAllCandidatesRanked(payload.candidates, parsed);
-    if (normalized) {
-      workerLog.info('llm.rank.success', {
-        provider,
-        attempt,
-        rankingsCount: normalized.length,
-      });
-      return {
-        model: provider === 'cursor' ? cursorConfig!.model : (httpConfig as LlmClientConfig).model,
-        rankings: normalized,
-      };
-    }
-
-    workerLog.warn('llm.rank.attempt_invalid', {
-      provider,
-      attempt,
-      reason: 'schema_or_candidate_mismatch',
-    });
+  if (!rankings) {
+    throw new Error('LLM scoring output failed schema validation after one retry.');
   }
 
-  throw new Error('LLM ranking output failed schema validation after one retry.');
+  workerLog.info('llm.rank.success', {
+    provider,
+    rankingsCount: rankings.length,
+  });
+
+  return {
+    model: provider === 'cursor' ? cursorConfig!.model : (httpConfig as LlmClientConfig).model,
+    rankings: rankings.map((row) => ({
+      ...row,
+      postingId: row.postingId as Id<'job_postings'>,
+    })),
+  };
 }
 
 /**
  * Helper for one-off/manual flows where Cursor CLI is the expected provider.
- * Defaults to `cursor` when no provider override is passed.
  */
 export async function rankJobsWithCursor(
   payload: Omit<LlmRequestPayload, 'provider'>,
-  provider: RankingProvider = 'cursor'
+  provider: RankingProviderKind = 'cursor'
 ): Promise<{
   model: string;
   rankings: RankingResult[];

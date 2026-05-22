@@ -1,6 +1,6 @@
 import type http from 'node:http';
 
-import { ConvexHttpClient } from 'convex/browser';
+import { createWorkerConvexClient } from './convexHttp.js';
 
 import { api } from './convexBridge/api.js';
 import { workerLog } from './log.js';
@@ -233,7 +233,7 @@ export async function handleIngestPostingRequest(params: {
     postings.push(normalized);
   }
 
-  const convex = new ConvexHttpClient(convexUrl);
+  const convex = createWorkerConvexClient(convexUrl);
 
   try {
     workerLog.info('ingest_posting.start', { count: postings.length });

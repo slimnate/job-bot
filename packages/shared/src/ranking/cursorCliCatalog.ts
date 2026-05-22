@@ -1,0 +1,137 @@
+/**
+ * Curated Cursor CLI model ids and display labels for the ranking LLM catalog.
+ * Passed to `cursor-agent --model`; seeded via `rankingLlmCatalog.seedCursorCliModelsCatalog`.
+ */
+export type CursorCliCatalogEntry = {
+  apiModelId: string;
+  displayName: string;
+};
+
+export const CURSOR_CLI_CATALOG: readonly CursorCliCatalogEntry[] = [
+  { apiModelId: 'auto', displayName: 'Auto (default)' },
+  { apiModelId: 'composer-2-fast', displayName: 'Composer 2 · Fast' },
+  { apiModelId: 'composer-2', displayName: 'Composer 2' },
+  { apiModelId: 'gpt-5.3-codex-low', displayName: 'GPT 5.3 Codex · Low' },
+  { apiModelId: 'gpt-5.3-codex-low-fast', displayName: 'GPT 5.3 Codex · Low · Fast' },
+  { apiModelId: 'gpt-5.3-codex', displayName: 'GPT 5.3 Codex' },
+  { apiModelId: 'gpt-5.3-codex-fast', displayName: 'GPT 5.3 Codex · Fast' },
+  { apiModelId: 'gpt-5.3-codex-high', displayName: 'GPT 5.3 Codex · High' },
+  { apiModelId: 'gpt-5.3-codex-high-fast', displayName: 'GPT 5.3 Codex · High · Fast' },
+  { apiModelId: 'gpt-5.3-codex-xhigh', displayName: 'GPT 5.3 Codex · Extra High' },
+  { apiModelId: 'gpt-5.3-codex-xhigh-fast', displayName: 'GPT 5.3 Codex · Extra High · Fast' },
+  { apiModelId: 'gpt-5.2', displayName: 'GPT 5.2' },
+  { apiModelId: 'gpt-5.2-codex-low', displayName: 'GPT 5.2 Codex · Low' },
+  { apiModelId: 'gpt-5.2-codex-low-fast', displayName: 'GPT 5.2 Codex · Low · Fast' },
+  { apiModelId: 'gpt-5.2-codex', displayName: 'GPT 5.2 Codex' },
+  { apiModelId: 'gpt-5.2-codex-fast', displayName: 'GPT 5.2 Codex · Fast' },
+  { apiModelId: 'gpt-5.2-codex-high', displayName: 'GPT 5.2 Codex · High' },
+  { apiModelId: 'gpt-5.2-codex-high-fast', displayName: 'GPT 5.2 Codex · High · Fast' },
+  { apiModelId: 'gpt-5.2-codex-xhigh', displayName: 'GPT 5.2 Codex · Extra High' },
+  { apiModelId: 'gpt-5.2-codex-xhigh-fast', displayName: 'GPT 5.2 Codex · Extra High · Fast' },
+  { apiModelId: 'gpt-5.1-codex-max-low', displayName: 'GPT 5.1 Codex Max · Low' },
+  { apiModelId: 'gpt-5.1-codex-max-low-fast', displayName: 'GPT 5.1 Codex Max · Low · Fast' },
+  { apiModelId: 'gpt-5.1-codex-max-medium', displayName: 'GPT 5.1 Codex Max · Medium' },
+  { apiModelId: 'gpt-5.1-codex-max-medium-fast', displayName: 'GPT 5.1 Codex Max · Medium · Fast' },
+  { apiModelId: 'gpt-5.1-codex-max-high', displayName: 'GPT 5.1 Codex Max · High' },
+  { apiModelId: 'gpt-5.1-codex-max-high-fast', displayName: 'GPT 5.1 Codex Max · High · Fast' },
+  { apiModelId: 'gpt-5.1-codex-max-xhigh', displayName: 'GPT 5.1 Codex Max · Extra High' },
+  { apiModelId: 'gpt-5.1-codex-max-xhigh-fast', displayName: 'GPT 5.1 Codex Max · Extra High · Fast' },
+  { apiModelId: 'composer-2.5', displayName: 'Composer 2.5' },
+  { apiModelId: 'gpt-5.5-high', displayName: 'GPT 5.5 · High' },
+  { apiModelId: 'gpt-5.5-high-fast', displayName: 'GPT 5.5 · High · Fast' },
+  { apiModelId: 'claude-opus-4-7-thinking-high', displayName: 'Claude Opus 4.7 · Thinking · High' },
+  { apiModelId: 'gpt-5.4-high', displayName: 'GPT 5.4 · High' },
+  { apiModelId: 'gpt-5.4-high-fast', displayName: 'GPT 5.4 · High · Fast' },
+  { apiModelId: 'claude-4.6-opus-high-thinking', displayName: 'Claude 4.6 Opus · High · Thinking' },
+  { apiModelId: 'claude-4.6-opus-high-thinking-fast', displayName: 'Claude 4.6 Opus · High · Thinking · Fast' },
+  { apiModelId: 'composer-2.5-fast', displayName: 'Composer 2.5 · Fast' },
+  { apiModelId: 'gpt-5.5-none', displayName: 'GPT 5.5 · None' },
+  { apiModelId: 'gpt-5.5-none-fast', displayName: 'GPT 5.5 · None · Fast' },
+  { apiModelId: 'gpt-5.5-low', displayName: 'GPT 5.5 · Low' },
+  { apiModelId: 'gpt-5.5-low-fast', displayName: 'GPT 5.5 · Low · Fast' },
+  { apiModelId: 'gpt-5.5-medium', displayName: 'GPT 5.5 · Medium' },
+  { apiModelId: 'gpt-5.5-medium-fast', displayName: 'GPT 5.5 · Medium · Fast' },
+  { apiModelId: 'gpt-5.5-extra-high', displayName: 'GPT 5.5 · Extra High' },
+  { apiModelId: 'gpt-5.5-extra-high-fast', displayName: 'GPT 5.5 · Extra High · Fast' },
+  { apiModelId: 'claude-4.6-sonnet-medium', displayName: 'Claude 4.6 Sonnet · Medium' },
+  { apiModelId: 'claude-4.6-sonnet-medium-thinking', displayName: 'Claude 4.6 Sonnet · Medium · Thinking' },
+  { apiModelId: 'claude-opus-4-7-low', displayName: 'Claude Opus 4.7 · Low' },
+  { apiModelId: 'claude-opus-4-7-low-fast', displayName: 'Claude Opus 4.7 · Low · Fast' },
+  { apiModelId: 'claude-opus-4-7-medium', displayName: 'Claude Opus 4.7 · Medium' },
+  { apiModelId: 'claude-opus-4-7-medium-fast', displayName: 'Claude Opus 4.7 · Medium · Fast' },
+  { apiModelId: 'claude-opus-4-7-high', displayName: 'Claude Opus 4.7 · High' },
+  { apiModelId: 'claude-opus-4-7-high-fast', displayName: 'Claude Opus 4.7 · High · Fast' },
+  { apiModelId: 'claude-opus-4-7-xhigh', displayName: 'Claude Opus 4.7 · Extra High' },
+  { apiModelId: 'claude-opus-4-7-xhigh-fast', displayName: 'Claude Opus 4.7 · Extra High · Fast' },
+  { apiModelId: 'claude-opus-4-7-max', displayName: 'Claude Opus 4.7 · Max' },
+  { apiModelId: 'claude-opus-4-7-max-fast', displayName: 'Claude Opus 4.7 · Max · Fast' },
+  { apiModelId: 'claude-opus-4-7-thinking-low', displayName: 'Claude Opus 4.7 · Thinking · Low' },
+  { apiModelId: 'claude-opus-4-7-thinking-low-fast', displayName: 'Claude Opus 4.7 · Thinking · Low · Fast' },
+  { apiModelId: 'claude-opus-4-7-thinking-medium', displayName: 'Claude Opus 4.7 · Thinking · Medium' },
+  { apiModelId: 'claude-opus-4-7-thinking-medium-fast', displayName: 'Claude Opus 4.7 · Thinking · Medium · Fast' },
+  { apiModelId: 'claude-opus-4-7-thinking-high-fast', displayName: 'Claude Opus 4.7 · Thinking · High · Fast' },
+  { apiModelId: 'claude-opus-4-7-thinking-xhigh', displayName: 'Claude Opus 4.7 · Thinking · Extra High' },
+  { apiModelId: 'claude-opus-4-7-thinking-xhigh-fast', displayName: 'Claude Opus 4.7 · Thinking · Extra High · Fast' },
+  { apiModelId: 'claude-opus-4-7-thinking-max', displayName: 'Claude Opus 4.7 · Thinking · Max' },
+  { apiModelId: 'claude-opus-4-7-thinking-max-fast', displayName: 'Claude Opus 4.7 · Thinking · Max · Fast' },
+  { apiModelId: 'grok-build-0.1', displayName: 'Grok Build 0.1' },
+  { apiModelId: 'gpt-5.4-low', displayName: 'GPT 5.4 · Low' },
+  { apiModelId: 'gpt-5.4-medium', displayName: 'GPT 5.4 · Medium' },
+  { apiModelId: 'gpt-5.4-medium-fast', displayName: 'GPT 5.4 · Medium · Fast' },
+  { apiModelId: 'gpt-5.4-xhigh', displayName: 'GPT 5.4 · Extra High' },
+  { apiModelId: 'gpt-5.4-xhigh-fast', displayName: 'GPT 5.4 · Extra High · Fast' },
+  { apiModelId: 'claude-4.6-opus-high', displayName: 'Claude 4.6 Opus · High' },
+  { apiModelId: 'claude-4.6-opus-max', displayName: 'Claude 4.6 Opus · Max' },
+  { apiModelId: 'claude-4.6-opus-max-thinking', displayName: 'Claude 4.6 Opus · Max · Thinking' },
+  { apiModelId: 'claude-4.6-opus-max-thinking-fast', displayName: 'Claude 4.6 Opus · Max · Thinking · Fast' },
+  { apiModelId: 'claude-4.5-opus-high', displayName: 'Claude 4.5 Opus · High' },
+  { apiModelId: 'claude-4.5-opus-high-thinking', displayName: 'Claude 4.5 Opus · High · Thinking' },
+  { apiModelId: 'gpt-5.2-low', displayName: 'GPT 5.2 · Low' },
+  { apiModelId: 'gpt-5.2-low-fast', displayName: 'GPT 5.2 · Low · Fast' },
+  { apiModelId: 'gpt-5.2-fast', displayName: 'GPT 5.2 · Fast' },
+  { apiModelId: 'gpt-5.2-high', displayName: 'GPT 5.2 · High' },
+  { apiModelId: 'gpt-5.2-high-fast', displayName: 'GPT 5.2 · High · Fast' },
+  { apiModelId: 'gpt-5.2-xhigh', displayName: 'GPT 5.2 · Extra High' },
+  { apiModelId: 'gpt-5.2-xhigh-fast', displayName: 'GPT 5.2 · Extra High · Fast' },
+  { apiModelId: 'gemini-3.1-pro', displayName: 'Gemini 3.1 Pro' },
+  { apiModelId: 'gpt-5.4-mini-none', displayName: 'GPT 5.4 Mini · None' },
+  { apiModelId: 'gpt-5.4-mini-low', displayName: 'GPT 5.4 Mini · Low' },
+  { apiModelId: 'gpt-5.4-mini-medium', displayName: 'GPT 5.4 Mini · Medium' },
+  { apiModelId: 'gpt-5.4-mini-high', displayName: 'GPT 5.4 Mini · High' },
+  { apiModelId: 'gpt-5.4-mini-xhigh', displayName: 'GPT 5.4 Mini · Extra High' },
+  { apiModelId: 'gpt-5.4-nano-none', displayName: 'GPT 5.4 Nano · None' },
+  { apiModelId: 'gpt-5.4-nano-low', displayName: 'GPT 5.4 Nano · Low' },
+  { apiModelId: 'gpt-5.4-nano-medium', displayName: 'GPT 5.4 Nano · Medium' },
+  { apiModelId: 'gpt-5.4-nano-high', displayName: 'GPT 5.4 Nano · High' },
+  { apiModelId: 'gpt-5.4-nano-xhigh', displayName: 'GPT 5.4 Nano · Extra High' },
+  { apiModelId: 'grok-4.3', displayName: 'Grok 4.3' },
+  { apiModelId: 'claude-4.5-sonnet', displayName: 'Claude 4.5 Sonnet' },
+  { apiModelId: 'claude-4.5-sonnet-thinking', displayName: 'Claude 4.5 Sonnet · Thinking' },
+  { apiModelId: 'gpt-5.1-low', displayName: 'GPT 5.1 · Low' },
+  { apiModelId: 'gpt-5.1', displayName: 'GPT 5.1' },
+  { apiModelId: 'gpt-5.1-high', displayName: 'GPT 5.1 · High' },
+  { apiModelId: 'gemini-3-flash', displayName: 'Gemini 3 Flash' },
+  { apiModelId: 'gemini-3.5-flash', displayName: 'Gemini 3.5 Flash' },
+  { apiModelId: 'gpt-5.1-codex-mini-low', displayName: 'GPT 5.1 Codex Mini · Low' },
+  { apiModelId: 'gpt-5.1-codex-mini', displayName: 'GPT 5.1 Codex Mini' },
+  { apiModelId: 'gpt-5.1-codex-mini-high', displayName: 'GPT 5.1 Codex Mini · High' },
+  { apiModelId: 'claude-4-sonnet', displayName: 'Claude 4 Sonnet' },
+  { apiModelId: 'claude-4-sonnet-thinking', displayName: 'Claude 4 Sonnet · Thinking' },
+  { apiModelId: 'gpt-5-mini', displayName: 'GPT 5 Mini' },
+  { apiModelId: 'kimi-k2.5', displayName: 'Kimi K2.5' },
+] as const;
+
+/** Stable ids in catalog order (`auto` first). */
+export const CURSOR_CLI_MODEL_IDS: readonly string[] = CURSOR_CLI_CATALOG.map((e) => e.apiModelId);
+
+const DISPLAY_BY_ID = new Map(CURSOR_CLI_CATALOG.map((e) => [e.apiModelId, e.displayName]));
+
+/** Human-readable label for a Cursor CLI model id from the catalog. */
+export function cursorModelIdToDisplayName(apiModelId: string): string {
+  const trimmed = apiModelId.trim();
+  const found = DISPLAY_BY_ID.get(trimmed);
+  if (!found) {
+    throw new Error(`Unknown Cursor CLI model id '${trimmed}'.`);
+  }
+  return found;
+}

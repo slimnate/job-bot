@@ -3,7 +3,6 @@ import { v } from 'convex/values';
 
 const rankingResultValidator = v.object({
   postingId: v.id('job_postings'),
-  rank: v.number(),
   scoreOverall: v.number(),
   reasoningSummary: v.string(),
   criteriaMatch: v.any(),
@@ -69,15 +68,12 @@ export const upsertResults = mutation({
   handler: async (ctx, args) => {
     const now = Date.now();
     const rankedAt = args.rankedAt ?? now;
-    const merged = new Map<
-      string,
-      (typeof args.rankings)[number]
-    >();
+    const merged = new Map<string, (typeof args.rankings)[number]>();
 
     for (const ranking of args.rankings) {
       const key = ranking.postingId;
       const prior = merged.get(key);
-      if (!prior || ranking.rank < prior.rank) {
+      if (!prior || ranking.scoreOverall > prior.scoreOverall) {
         merged.set(key, ranking);
       }
     }
@@ -89,7 +85,6 @@ export const upsertResults = mutation({
         postingId: ranking.postingId,
         evaluatorId: args.evaluatorId,
         scrapeRunId: args.scrapeRunId,
-        rank: ranking.rank,
         scoreOverall: ranking.scoreOverall,
         model: args.model,
         reasoningSummary: ranking.reasoningSummary,

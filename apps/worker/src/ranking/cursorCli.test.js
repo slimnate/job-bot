@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import {
+  buildCursorCliArgs,
+  createCursorCliLineBuffer,
+  drainCursorCliLines,
+  flushCursorCliLineBuffer,
+  formatCursorCliFailure,
+  hasCliArgFlag,
+  resolveCursorApiModelId,
+} from './cursorCli.ts';
+
+describe('cursorCli', () => {
+  it('resolveCursorApiModelId maps legacy cursor-default to auto', () => {
+    assert.equal(resolveCursorApiModelId('cursor-default'), 'auto');
+    assert.equal(resolveCursorApiModelId('composer-2.5-fast'), 'composer-2.5-fast');
+  });
+
+  it('hasCliArgFlag detects --mode=ask', () => {
+    assert.equal(hasCliArgFlag(['--print', '--mode=ask', '--trust'], '--mode'), true);
+    assert.equal(hasCliArgFlag(['--mode', 'ask'], '--mode'), true);
+    assert.equal(hasCliArgFlag(['--print'], '--mode'), false);
+  });
+
+  it('buildCursorCliArgs does not duplicate --mode when already --mode=ask', () => {
+    const args = buildCursorCliArgs(
+      {
+        command: 'cursor-agent',
+        args: ['--print', '--mode=ask', '--trust', '--output-format', 'text'],
+        timeoutMs: 60_000,
+        model: 'auto',
+        workspaceDir: '/tmp/ws',
+      },
+      'hello',
+      { minimalContext: true }
+    );
+    const modeCount = args.filter((a) => a === '--mode' || a.startsWith('--mode=')).length;
+    assert.equal(modeCount, 1);
+    assert.equal(args[args.length - 1], 'hello');
+    assert.ok(args.includes('--model'));
+    assert.equal(args[args.indexOf('--model') + 1], 'auto');
+  });
+
+  it('drainCursorCliLines splits on newlines and keeps a partial tail', () => {
+    const buf = createCursorCliLineBuffer();
+    assert.deepEqual(drainCursorCliLines(buf, 'line one\nline two\npart'), ['line one', 'line two']);
+    assert.equal(buf.pending, 'part');
+    assert.deepEqual(drainCursorCliLines(buf, 'ial\n'), ['partial']);
+    assert.equal(buf.pending, '');
+    assert.equal(flushCursorCliLineBuffer(buf), null);
+  });
+
+  it('flushCursorCliLineBuffer returns trailing text without a newline', () => {
+    const buf = createCursorCliLineBuffer();
+    drainCursorCliLines(buf, '{"scores":[]');
+    assert.equal(flushCursorCliLineBuffer(buf), '{"scores":[]');
+    assert.equal(buf.pending, '');
+  });
+
+  it('formatCursorCliFailure includes stderr', () => {
+    const text = formatCursorCliFailure({
+      reason: 'bad model',
+      command: 'cursor-agent',
+      args: ['--model', 'nope'],
+      stderr: 'Cannot use this model: nope',
+    });
+    assert.match(text, /stderr:/);
+    assert.match(text, /Cannot use this model/);
+    assert.match(text, /Command:/);
+  });
+});

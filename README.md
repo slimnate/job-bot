@@ -10,7 +10,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - humanized discovered timestamps (same-day time, older relative age)
   - postings shown as a **list** (`PostingTable.tsx`): each item has a compact meta row (color-coded score, `<position> - <company>`, source, location, ranked/discovered, actions), a description preview with **Show full description** / **Show less** when the text is long (scrapers store the **full** multiline description in `job_postings.descriptionSnippet`), and latest ranking details (reasoning, model, criteria match, red flags)
   - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes, bulk `Score selected` / `Delete selected`, and `Clear All`
-  - bulk score uses one batched LLM prompt/request per provider path (shared criteria context + all selected postings) to reduce token usage
+  - bulk score uses **fixed-size chunks** (default **3 postings** per LLM/CLI request); global rank is merged by `scoreOverall` after all chunks succeed
 - detailed modal view (human-readable fields + raw JSON), including latest reasoning summary rendered as markdown (supports tables/lists from LLM output)
 - Workers (`/workers`) scheduler status (`WorkerSchedulerPanel` → reactive Convex `worker_scheduler_status`), queue + history (`apps/web/src/components/HistoryViewer.tsx`, `apps/web/src/components/ScrapeQueuePanel.tsx`) with:
   - status color coding (`queued` blue, `running` yellow, `succeeded` green, `failed`/`cancelled` red)
@@ -27,7 +27,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - Posting upsert/list (`convex/postings.ts`)
   - Run lifecycle (`convex/runs.ts`)
   - Ranking recompute/upsert (`convex/ranking.ts`)
-  - Ranking LLM catalog for the Score dialog (`convex/rankingLlmCatalog.ts`): providers + models; seed with `npm run populate:ranking-catalog`
+  - Ranking LLM catalog for the Score dialog (`convex/rankingLlmCatalog.ts`): providers + models; seed Cursor rows with `npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog` or full catalog with `npm run populate:ranking-catalog`
 - Worker runtime with:
   - Cron-like scheduler (`apps/worker/src/scheduler.ts`)
   - In-memory bounded queue abstraction (`apps/worker/src/queue.ts`)
@@ -45,7 +45,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 3. Worker dequeues runs with bounded concurrency.
 4. Worker collects postings for a source (**LinkedIn implemented**; unsupported sources fail fast to avoid placeholder data pollution). For LinkedIn, the worker opens `/jobs/`, waits for a signed-in jobs UI (optional `LINKEDIN_USER` / `LINKEDIN_PASS` auto-login, or sign in manually in the Chrome window). When `sourceCriteria.search` is set, it runs a **UI-only** search on `/jobs/`: the SDUI typeahead (`input[data-testid="typeahead-input"][componentkey="jobSearchBox"]`, placeholder “Describe the job you want”) receives `"<search> in <location>"` when location is also set, or just the search term when location is omitted (LinkedIn then uses your profile’s default location). Submit is Enter or a Search button. With empty `search`, the preferences hub path runs (“Show all”); `location` without `search` is ignored. It does not navigate to `/jobs/search/?location=…` or `geoId=…` URLs. With empty criteria it uses the preferences hub (“Show all”). The listing/detail scraper expands “About the job” when possible and persists the **full** job description with line breaks (bounded by a large storage cap) in `job_postings.descriptionSnippet`. LinkedIn scrape cleanup tears down Chrome after each run by default (`WORKER_AUTO_CLEANUP_CHROME=1`).
 5. Worker upserts postings in Convex (`postings.upsertBatch`).
-6. Worker computes LLM ranking using the **run’s** `evaluatorId` when set, otherwise the **`job_sources.defaultEvaluatorId`** for that run’s source (Sources page), otherwise **`WORKER_DEFAULT_EVALUATOR_ID`** on that worker process, and persists results (`ranking.upsertResults`) unless disabled with `WORKER_ENABLE_LLM_RANKING=0` during testing.
+6. Worker scores postings with the LLM: **Cursor** = one CLI call per run (batch files under `ranking-cli-workspace/.ranking-batches/`); **HTTP** = one API call per posting. Uses the **run’s** `evaluatorId` when set, otherwise **`job_sources.defaultEvaluatorId`** for that source (Sources page), otherwise **`WORKER_DEFAULT_EVALUATOR_ID`** on that worker process. Each posting gets an independent `scoreOverall` (no global rank). Results are persisted via `ranking.upsertResults` unless disabled with `WORKER_ENABLE_LLM_RANKING=0` during testing.
 7. Worker marks run status and stats (`runs.updateStatus`).
 8. While a run executes, the worker mirrors JSON log lines to Convex (`runLogs.appendBatch`) for inspection in the dashboard.
 9. Web app updates from Convex queries.
@@ -72,7 +72,7 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `scrape_runs.linkedinFallbackReason`: structured reason when fallback is used
 - `run_log_lines`: JSON log lines for a run (streamed from the worker; used by the Workers log modal and run log page)
 - `job_postings`: normalized postings deduplicated by source + external id
-- `job_rankings`: per-posting ranking outputs with score + reasoning, linked by `evaluatorId`
+- `job_rankings`: per-posting scoring outputs (`scoreOverall`, reasoning, criteria match, red flags) linked by `evaluatorId` — no `rank` field
 - `ranking_llm_providers`: stable `key`, `displayName`, `surface` (`convex_http` = OpenAI-compatible call from Convex; `worker_cursor` = Cursor CLI on the worker), `sortOrder`
 - `ranking_llm_models`: `providerKey`, `apiModelId`, `displayName`, `sortOrder` (options shown in the Score dialog)
 
@@ -119,6 +119,7 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.ranking.upsertResults`
 - `api.rankingLlmCatalog.listForUi` (providers + models for the Score dialog)
 - `api.rankingLlmCatalog.replaceCatalog` (mutation: full replace of catalog; used by `populate:ranking-catalog`)
+- `api.rankingLlmCatalog.seedCursorCliModelsCatalog` (mutation: delete all `cursor` model rows, insert 111 Cursor CLI models from `@job-bot/shared`; OpenAI rows unchanged)
 - `api.rankingScorePosting.scoreOnePosting` (Convex **action**: OpenAI / compatible HTTP path only; writes `job_rankings`; Cursor uses worker `POST /rank-posting`)
 
 ## Local setup
@@ -165,7 +166,7 @@ Worker-specific optional env vars:
 Stored postings include `rawPayload.extractionDiagnostics` (`salarySource`, `hasListCard`, `hasDetailRoot`, `detailLikelyForJob`, `currentJobIdFromUrl`) for debugging. Regression coverage: `npm run test:worker` (requires dependencies installed; the worker lists `jsdom` as a dev dependency).
 
 - `WORKER_LINKEDIN_DEBUG_STEPS` (default: off / `none` if unset): `none` | `coarse` | `fine` — controls **manual Continue** stepping only (in-page `waitMajor` / `waitFine` and Node `linkedInWaitStep`). After the jobs shell is ready, the worker **always** injects the **full** top bar (stats badges, Pause/Resume, Finish & rank, Continue, Abort). **`none`**: no manual checkpoints. **`coarse`**: pauses at major phases and before pagination. **`fine`**: also pauses after each job (title + ~100-character description preview in the bar). While stepping, each job is upserted live when captured (final batch upsert still runs). Set in `.env.local` while iterating. **Important:** Node’s `--env-file` does **not** override variables already set in the process environment, so a shell export of `WORKER_LINKEDIN_DEBUG_STEPS=…` would ignore your `.env.local` value for that key until you unset it or remove the export.
-- **Worker debug flags** (optional, default off; each enables `workerLog.debug` for that subsystem — hide **debug** lines in the Workers **Run logs** modal with the level checkboxes when you do not need them): **`SCHEDULER_DEBUG`** (scheduler tick start, queue enqueue/task start-finish, skipped status flush), **`ORCHESTRATOR_DEBUG`** (trigger/DB-queue summaries, skip-duplicate claims, run doc loaded; **`run.log.flush`** is one JSON line per flush to **stdout** only — total lines appended — so it is not re-buffered into Convex run logs), **`SCRAPE_DEBUG`** (Chrome reconnect/ping/cleanup, source adapter + browser lock, LinkedIn milestones / overlay inject / stream dedupe skips), **`RANK_DEBUG`** (HTTP rank request/load/invoke, LLM rank attempts). Convex **`retry.attempt`** logs are gated per call site: orchestrator `withRetry` uses **`ORCHESTRATOR_DEBUG`**; rank handler and LLM HTTP `withRetry` use **`RANK_DEBUG`**.
+- **Worker debug flags** (optional, default off; each enables `workerLog.debug` for that subsystem — hide **debug** lines in the Workers **Run logs** modal with the level checkboxes when you do not need them): **`SCHEDULER_DEBUG`** (scheduler tick start, queue enqueue/task start-finish, skipped status flush), **`ORCHESTRATOR_DEBUG`** (trigger/DB-queue summaries, skip-duplicate claims, run doc loaded; **`run.log.flush`** is one JSON line per flush to **stdout** only — total lines appended — so it is not re-buffered into Convex run logs), **`SCRAPE_DEBUG`** (Chrome reconnect/ping/cleanup, source adapter + browser lock, LinkedIn milestones / overlay inject / stream dedupe skips), **`RANK_DEBUG`** (HTTP rank request/load/invoke, LLM rank attempts). **`LLM_RANKING_CURSOR_LOG_OUTPUT`** (default on) streams each `cursor-agent` stdout/stderr line as **`llm.rank.cursor_cli.output`** during Cursor ranking (set `0` to silence). Convex **`retry.attempt`** logs are gated per call site: orchestrator `withRetry` uses **`ORCHESTRATOR_DEBUG`**; rank handler and LLM HTTP `withRetry` use **`RANK_DEBUG`**.
 - `WORKER_DEFAULT_EVALUATOR_ID` (optional): Convex document id for `job_evaluators` used when a scrape run has no `evaluatorId` **and** the source has no `defaultEvaluatorId`. Set on each worker host (e.g. in `.env.local`). If unset after those checks, ranking still runs but with an empty evaluator profile (and the worker logs a warning). The id must point to a row that exists and has **Active** on if you want full profile context in the ranker.
 - `WORKER_ENABLE_LLM_RANKING` (default: `true`; set `0` during testing to skip post-scrape LLM ranking and complete runs with `rankedCount=0`)
 - `WORKER_QUEUE_CONCURRENCY` (default: `2`): multiple sources can run in parallel, but **LinkedIn scrapes are serialized** in the worker (one shared Chrome tab/CDP session) so two LinkedIn jobs never navigate at once.
@@ -173,10 +174,20 @@ Stored postings include `rawPayload.extractionDiagnostics` (`salarySource`, `has
 - `WORKER_RUN_ON_START` (default: `true`): controls whether the scheduler immediately checks for already queued runs on worker boot; it does **not** auto-create new scrape runs.
 - `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS` (optional): max time in milliseconds that `npm run trigger:linkedin` polls Convex for the LinkedIn run to finish (default **45 minutes**).
 - `LLM_RANKING_PROVIDER` (default: `cursor`; options: `cursor`, `http`)
-- `LLM_RANKING_MODEL` (provider model label/override)
-- `LLM_RANKING_TIMEOUT_MS` (provider timeout in milliseconds, default: `60000`)
+- `LLM_RANKING_MODEL` (HTTP OpenAI model; optional fallback for Cursor if `LLM_RANKING_CURSOR_MODEL` unset)
+- `LLM_RANKING_CURSOR_MODEL` (default: `auto`; passed to `cursor-agent --model`. Legacy `cursor-default` from old catalog rows is mapped to `auto`.)
+- `LLM_RANKING_TIMEOUT_MS` (base timeout in milliseconds, default: `60000`)
+- `LLM_RANKING_TIMEOUT_PER_CANDIDATE_MS` (added to base timeout per posting, default: `5000`)
+- `LLM_RANKING_DESCRIPTION_MAX_CHARS` (max job description chars in HTTP inline prompts; full text stays in DB and in Cursor `postings.json`, default: `4096`)
+- `LLM_RANKING_CURSOR_USE_BATCH_FILES` (default: `1`; write `postings.json` + `evaluator.json` under `ranking-cli-workspace/.ranking-batches/`)
+- `LLM_RANKING_CURSOR_INLINE_PROMPT` (default: `0`; set `1` to put all posting text in the argv prompt instead of batch files)
+- `LLM_RANKING_CURSOR_KEEP_BATCH_FILES` (default: `0`; set `1` to leave batch dirs on disk for debugging)
+- `LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS` (extra timeout when using batch files, default: `90000`)
+- `LLM_RANKING_CURSOR_MINIMAL_CONTEXT` (default: `1`; set `0` to skip forced `--mode=ask`, `--trust`, `--workspace`)
+- `LLM_RANKING_CURSOR_LOG_OUTPUT` (default: `1`; set `0` to disable streaming `llm.rank.cursor_cli.output` debug logs for each `cursor-agent` stdout/stderr line)
 - `CURSOR_CLI_COMMAND` (default: `cursor-agent`)
-- `CURSOR_CLI_ARGS` (default: `--print`; use `{prompt}` placeholder to inject prompt in custom arg layouts)
+- `CURSOR_CLI_ARGS` (default: `--print --mode=ask --trust --output-format text`; use `{prompt}` to inject prompt from a temp file when the prompt exceeds ~200k chars)
+- `CURSOR_CLI_WORKSPACE` (default: `apps/worker/ranking-cli-workspace` — empty dir so repo `AGENTS.md` / `.cursor/rules` are not loaded)
 
 LinkedIn automation may conflict with LinkedIn’s terms; only use credentials and tooling you are allowed to use.
 
@@ -186,17 +197,32 @@ For `http` provider mode:
 - `LLM_API_BASE_URL` (optional; defaults to `https://api.openai.com/v1`)
 - `LLM_RANKING_TEMPERATURE` (optional; default: `0.1`)
 
+`LLM_RANKING_DESCRIPTION_MAX_CHARS` also applies to Convex **`scorePostingsBatch`** / **`scoreOnePosting`** when scoring from the Postings page via OpenAI (one HTTP request per posting).
+
+**Live ranking logs (Postings score dialog):** For Cursor scoring, the web UI generates a **`rankingRunId`**, opens **`GET /rank-logs?rankingRunId=…`** (SSE), then **`POST /rank-posting(s)`** with the same id. The worker mirrors every **`llm.rank.*`** log line (including `llm.rank.run.begin` / `llm.rank.run.end`) into that stream while the run is active.
+
+**Ranking vs saving:** The worker runs `cursor-agent` first, then calls Convex **`ranking.upsertResults`**. If you see **`llm.rank.success`** followed by **`rank_posting.save_failed`** or **`fetch failed`** on `ranking.upsertResults`, the model output was parsed correctly but the worker could not reach your deployment — confirm **`CONVEX_URL`** in `.env.local`, keep **`npx convex dev`** running, and check network/DNS to `*.convex.cloud`. The Postings UI will show the computed score with a save error when that happens.
+
+**Schema note:** `job_rankings` no longer stores `rank`. After deploying the schema change in dev, clear stale rows (Postings **Clear All**, or `postings.clearAll`) so old documents with `rank` do not linger.
+
 ### 3) Run Convex
 
 Use your normal Convex workflow (for example, `npx convex dev`) so generated API types stay current.
 
-**Postings page → Score:** choose **OpenAI** (Convex action `api.rankingScorePosting.scoreOnePosting`) or **Cursor CLI** (browser `fetch` to the worker `POST /rank-posting`). Populate provider/model rows with `npm run populate:ranking-catalog` (see script header for env vars).
+**Postings page → Score:** choose **OpenAI** (Convex action `api.rankingScorePosting.scoreOnePosting`) or **Cursor CLI** (browser `fetch` to the worker `POST /rank-posting`). Populate provider/model rows with `npm run populate:ranking-catalog` (see script header for env vars), or refresh only Cursor models:
+
+```bash
+npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog
+```
+
+The Score dialog **Model** field is a searchable dropdown (`FilterSelect`) — type to filter the list (useful when the Cursor catalog lists 111 models).
 
 Convex (OpenAI path):
 
 - `OPENAI_API_KEY` (required for OpenAI in **Score**)
 - `LLM_API_BASE_URL` (optional; default `https://api.openai.com/v1`)
 - `LLM_RANKING_TEMPERATURE` (optional; default `0.1`)
+- `LLM_RANKING_DESCRIPTION_MAX_CHARS` (optional; Convex dashboard env)
 
 ### 4) Run the web app
 
@@ -238,7 +264,8 @@ curl -s -X POST http://127.0.0.1:3999/ingest-posting \
   -H 'Content-Type: application/json' \
   -d '{"source":"linkedin","externalId":"123","url":"https://www.linkedin.com/jobs/view/123/","title":"Test","company":"Co"}'
 ```
-- `npm run populate:ranking-catalog` — fetches OpenAI `/v1/models` (chat-oriented filter) and merges a static Cursor CLI model list into Convex (`rankingLlmCatalog.replaceCatalog`). Requires `CONVEX_URL` and `OPENAI_API_KEY` for live OpenAI rows.
+- `npm run populate:ranking-catalog` — fetches OpenAI `/v1/models` (chat-oriented filter) and merges the full Cursor CLI catalog from `@job-bot/shared` into Convex (`rankingLlmCatalog.replaceCatalog`). Requires `CONVEX_URL` and `OPENAI_API_KEY` for live OpenAI rows. Build shared first if imports fail: `npm run build --workspace @job-bot/shared`.
+- `npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog` — replaces only Cursor provider models (111 rows); does not wipe OpenAI catalog rows.
 - `npm run trigger:linkedin` — if nothing responds on the worker HTTP trigger port, builds (unless `--skip-worker-build`) and **imports the worker in the same Node process** (`startWorker()`), so worker logs and errors print in your terminal. Queues a LinkedIn scrape, runs **`scheduler.runNow()`** (no HTTP hop when embedded), waits until Convex reports a terminal run status (override timeout with `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS`). If a worker is already listening on the trigger port, only queues + **POST /trigger** is used. Loads `.env.local` via Node’s `--env-file`. Criteria are sent as `sourceCriteria`: `npm run trigger:linkedin -- --query "your terms"` and optionally `… --location "Austin, TX"` (searched as `your terms in Austin, TX` in the LinkedIn UI; omit `--location` to use your profile location). Flags: `--no-start-worker`, `--skip-worker-build`, `--no-wait` (exit before polling run completion).
 
 Per workspace:

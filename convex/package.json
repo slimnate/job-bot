@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@job-bot/shared": "0.1.0",
     "convex": "^1.36.1"
   }
 }

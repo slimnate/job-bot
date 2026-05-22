@@ -1,6 +1,5 @@
 export type RankingResult = {
   postingId: string;
-  rank: number;
   scoreOverall: number;
   reasoningSummary: string;
   criteriaMatch: Record<string, unknown>;
@@ -21,16 +20,12 @@ export function validateRankingResult(value: unknown): RankingResult | null {
   }
 
   const postingId = record.postingId;
-  const rank = record.rank;
   const scoreOverall = record.scoreOverall;
   const reasoningSummary = record.reasoningSummary;
   const criteriaMatch = record.criteriaMatch;
   const redFlags = record.redFlags;
 
   if (typeof postingId !== 'string' || postingId.length === 0) {
-    return null;
-  }
-  if (typeof rank !== 'number' || !Number.isInteger(rank) || rank < 1) {
     return null;
   }
   if (typeof scoreOverall !== 'number' || scoreOverall < 0 || scoreOverall > 100) {
@@ -48,7 +43,6 @@ export function validateRankingResult(value: unknown): RankingResult | null {
 
   return {
     postingId,
-    rank,
     scoreOverall,
     reasoningSummary: reasoningSummary.trim(),
     criteriaMatch: criteriaMatch as Record<string, unknown>,

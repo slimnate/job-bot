@@ -1,6 +1,11 @@
-import { ConvexHttpClient } from 'convex/browser';
+import type { ConvexHttpClient } from 'convex/browser';
 
 import { api } from './convexBridge/api.js';
+import {
+  convexReadRetryOptions,
+  convexSaveRetryOptions,
+  createWorkerConvexClient,
+} from './convexHttp.js';
 import type { Doc, Id } from './convexBridge/doc.js';
 
 const runIdKey = (runId: Id<'scrape_runs'>): string => runId as string;
@@ -37,11 +42,6 @@ const defaultStats = {
   errorCount: 0,
 };
 
-const convexRetryOptions = {
-  maxAttempts: 4,
-  baseDelayMs: 250,
-  maxDelayMs: 5000,
-} as const;
 
 /**
  * Node's `fetch()` often throws `TypeError: fetch failed` with the real reason on `error.cause`
@@ -69,14 +69,14 @@ export class WorkerOrchestrator {
   private readonly inflightRunIds = new Set<string>();
 
   constructor(params: { convexUrl: string; concurrency: number; enableLlmRanking?: boolean }) {
-    this.convex = new ConvexHttpClient(params.convexUrl);
+    this.convex = createWorkerConvexClient(params.convexUrl);
     this.queue = new InMemoryTaskQueue<QueuePayload>(params.concurrency);
     this.enableLlmRanking = params.enableLlmRanking ?? true;
   }
 
   private runConvex<T>(label: string, operation: () => Promise<T>): Promise<T> {
     return withRetry(operation, {
-      ...convexRetryOptions,
+      ...convexReadRetryOptions,
       label,
       retryDebugSubsystem: 'orchestrator',
     });
@@ -391,13 +391,23 @@ export class WorkerOrchestrator {
           rankedCount = rankings.length;
 
           if (rankings.length > 0) {
-            const saveResult = await this.runConvex(`ranking.upsertResults:${payload.runId}`, () =>
-              this.convex.mutation(api.ranking.upsertResults, {
-                evaluatorId: recompute.evaluator?._id,
-                scrapeRunId: payload.runId,
-                model: rankingResult.model,
-                rankings,
-              })
+            const saveResult = await withRetry(
+              () =>
+                this.convex.mutation(
+                  api.ranking.upsertResults,
+                  {
+                    evaluatorId: recompute.evaluator?._id,
+                    scrapeRunId: payload.runId,
+                    model: rankingResult.model,
+                    rankings,
+                  },
+                  { skipQueue: true }
+                ),
+              {
+                ...convexSaveRetryOptions,
+                label: `ranking.upsertResults:${payload.runId}`,
+                retryDebugSubsystem: 'rank',
+              }
             );
 
             workerLog.info('run.phase', {

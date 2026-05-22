@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAction, useMutation, useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
 import type { Id } from '../../../../convex/_generated/dataModel.js';
+import { FilterSelect } from './FilterSelect';
+import { formatRankRunLogLine, subscribeRankRunLogs } from '../rankRunLog.js';
 import { PostingTable, type PostingTableRow } from './PostingTable';
 
 type PostingSort = 'discoveredAtDesc' | 'postedAtDesc' | 'scoreDesc';
@@ -44,6 +46,9 @@ export function PostingViewer() {
   const [scoreApiModelId, setScoreApiModelId] = useState('');
   const [scoreBusy, setScoreBusy] = useState(false);
   const [scoreDialogError, setScoreDialogError] = useState('');
+  const [scoreRankLogs, setScoreRankLogs] = useState<string[]>([]);
+  const rankLogStopRef = useRef<(() => void) | null>(null);
+  const rankLogEndRef = useRef<HTMLDivElement | null>(null);
 
   const postings = useQuery(api.postings.list, {
     query: postingQuery.trim() || undefined,
@@ -104,6 +109,18 @@ export function PostingViewer() {
     });
   }, [scoreTargets, selectedProvider]);
 
+  const providerModels = selectedProvider?.models ?? [];
+
+  const scoreModelOptions = useMemo(
+    () =>
+      providerModels.map((m) => ({
+        value: m.apiModelId,
+        label: m.displayName,
+        sublabel: m.apiModelId,
+      })),
+    [providerModels]
+  );
+
   useEffect(() => {
     if (!postings) {
       return;
@@ -115,7 +132,14 @@ export function PostingViewer() {
     });
   }, [postings]);
 
+  const stopRankLogStream = () => {
+    rankLogStopRef.current?.();
+    rankLogStopRef.current = null;
+  };
+
   const openScoreDialog = (posting: PostingTableRow) => {
+    stopRankLogStream();
+    setScoreRankLogs([]);
     setScoreDialogError('');
     setScoreTargets([posting]);
   };
@@ -124,9 +148,20 @@ export function PostingViewer() {
     if (scoreBusy) {
       return;
     }
+    stopRankLogStream();
+    setScoreRankLogs([]);
     setScoreTargets([]);
     setScoreDialogError('');
   };
+
+  useEffect(() => {
+    if (!scoreRankLogs.length) {
+      return;
+    }
+    rankLogEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [scoreRankLogs]);
+
+  useEffect(() => () => stopRankLogStream(), []);
 
   const onSubmitScore = async () => {
     if (!scoreTargets.length || !scoreEvaluatorId) {
@@ -167,6 +202,21 @@ export function PostingViewer() {
         }
       } else {
         const base = workerTriggerBaseUrl();
+        const rankingRunId = crypto.randomUUID();
+        setScoreRankLogs([]);
+        rankLogStopRef.current = subscribeRankRunLogs(base, rankingRunId, {
+          onLog: (entry) => {
+            setScoreRankLogs((prev) => [...prev, formatRankRunLogLine(entry)]);
+          },
+          onEnd: (end) => {
+            if (!end.ok && end.error) {
+              setScoreDialogError((prev) =>
+                prev ? prev : `Ranking run finished with error: ${end.error}`
+              );
+            }
+          },
+        });
+
         if (scoreTargets.length === 1) {
           const res = await fetch(`${base}/rank-posting`, {
             method: 'POST',
@@ -175,11 +225,22 @@ export function PostingViewer() {
               postingId: scoreTargets[0]!._id,
               evaluatorId: scoreEvaluatorId,
               model: scoreApiModelId,
+              rankingRunId,
             }),
           });
-          const json = (await res.json()) as { ok?: boolean; error?: string };
+          const json = (await res.json()) as {
+            ok?: boolean;
+            error?: string;
+            ranked?: boolean;
+            scoreOverall?: number;
+          };
           if (!res.ok || !json.ok) {
-            setScoreDialogError(json.error ?? `Worker request failed (${res.status}).`);
+            const base = json.error ?? `Worker request failed (${res.status}).`;
+            setScoreDialogError(
+              json.ranked && typeof json.scoreOverall === 'number'
+                ? `Scored ${json.scoreOverall}/100 but could not save to the database. ${base}`
+                : base
+            );
             return;
           }
           setPostingMessage(`Scored '${scoreTargets[0]!.title}'.`);
@@ -191,11 +252,27 @@ export function PostingViewer() {
               postingIds: scoreTargets.map((posting) => posting._id),
               evaluatorId: scoreEvaluatorId,
               model: scoreApiModelId,
+              rankingRunId,
             }),
           });
-          const json = (await res.json()) as { ok?: boolean; error?: string; saved?: number };
+          const json = (await res.json()) as {
+            ok?: boolean;
+            error?: string;
+            saved?: number;
+            ranked?: boolean;
+            scores?: Array<{ postingId: string; scoreOverall: number }>;
+          };
           if (!res.ok || !json.ok) {
-            setScoreDialogError(json.error ?? `Worker batch request failed (${res.status}).`);
+            const base = json.error ?? `Worker batch request failed (${res.status}).`;
+            const scoreHint =
+              json.ranked && json.scores?.length
+                ? ` Scores: ${json.scores.map((s) => `${s.scoreOverall}`).join(', ')}.`
+                : '';
+            setScoreDialogError(
+              json.ranked
+                ? `Ranking finished but could not save to the database.${scoreHint} ${base}`
+                : base
+            );
             return;
           }
           setPostingMessage(`Scored ${json.saved ?? scoreTargets.length} posting(s) in one batch request.`);
@@ -208,6 +285,7 @@ export function PostingViewer() {
         error instanceof Error ? error.message : 'Scoring failed. Is the worker running with HTTP trigger port?'
       );
     } finally {
+      stopRankLogStream();
       setScoreBusy(false);
     }
   };
@@ -284,6 +362,8 @@ export function PostingViewer() {
       return;
     }
     const selected = postings.filter((posting) => selectedPostingIds.has(posting._id));
+    stopRankLogStream();
+    setScoreRankLogs([]);
     setScoreDialogError('');
     setScoreTargets(selected);
   };
@@ -318,6 +398,9 @@ export function PostingViewer() {
     Boolean(scoreApiModelId) &&
     !catalogEmpty;
   const selectedCount = selectedPostingIds.size;
+
+  const scoreModelSelectDisabled =
+    scoreBusy || !providerModels.length || llmCatalog === undefined || catalogEmpty;
 
   const scoreHint =
     selectedProvider?.surface === 'worker_cursor' ? (
@@ -471,32 +554,34 @@ export function PostingViewer() {
                   ))
                 )}
               </select>
-              <label className='stacked-field' htmlFor='score-model-select'>
-                Model
-              </label>
-              <select
+              <FilterSelect
+                key={scoreProviderKey}
                 id='score-model-select'
-                className='score-criteria-select'
+                label='Model'
                 value={scoreApiModelId}
-                onChange={(event) => setScoreApiModelId(event.target.value)}
-                disabled={
-                  scoreBusy ||
-                  !selectedProvider?.models.length ||
-                  llmCatalog === undefined ||
-                  catalogEmpty
-                }
-              >
-                {!selectedProvider?.models.length ? (
-                  <option value=''>No models for this provider</option>
-                ) : (
-                  selectedProvider.models.map((m) => (
-                    <option key={m.apiModelId} value={m.apiModelId}>
-                      {m.displayName} ({m.apiModelId})
-                    </option>
-                  ))
-                )}
-              </select>
+                onChange={setScoreApiModelId}
+                options={scoreModelOptions}
+                disabled={scoreModelSelectDisabled}
+                placeholder='Search models…'
+                emptyMessage='No models for this provider'
+                noMatchMessage='No models match'
+              />
               {scoreHint}
+              {selectedProvider?.surface === 'worker_cursor' ? (
+                <div className='rank-run-log-panel' aria-live='polite' aria-label='Ranking log'>
+                  <div className='rank-run-log-panel__title'>Ranking log</div>
+                  {scoreRankLogs.length ? (
+                    <pre className='rank-run-log-panel__body'>
+                      {scoreRankLogs.join('\n')}
+                      <div ref={rankLogEndRef} />
+                    </pre>
+                  ) : (
+                    <p className='rank-run-log-panel__empty'>
+                      {scoreBusy ? 'Waiting for llm.rank logs from the worker…' : 'Live llm.rank logs appear here while scoring runs.'}
+                    </p>
+                  )}
+                </div>
+              ) : null}
               {scoreDialogError ? <p className='status-text error'>{scoreDialogError}</p> : null}
               <div className='modal-actions-row'>
                 <button type='button' onClick={closeScoreDialog} disabled={scoreBusy}>

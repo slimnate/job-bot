@@ -98,7 +98,6 @@ export default defineSchema({
     postingId: v.id('job_postings'),
     evaluatorId: v.optional(v.id('job_evaluators')),
     scrapeRunId: v.optional(v.id('scrape_runs')),
-    rank: v.number(),
     scoreOverall: v.number(),
     model: v.string(),
     reasoningSummary: v.string(),
@@ -158,7 +157,7 @@ export default defineSchema({
   /** Models offered per provider (`providerKey` matches `ranking_llm_providers.key`). */
   ranking_llm_models: defineTable({
     providerKey: v.string(),
-    /** Value passed to the provider API / CLI (e.g. `gpt-4.1-mini`, `cursor-default`). */
+    /** Value passed to the provider API / CLI (e.g. `gpt-4.1-mini`, `auto`). */
     apiModelId: v.string(),
     displayName: v.string(),
     sortOrder: v.number(),

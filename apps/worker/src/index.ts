@@ -1,8 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ConvexHttpClient } from 'convex/browser';
-
+import { createWorkerConvexClient } from './convexHttp.js';
 import { initWorkerChromeFromEnv } from './chromeSession.js';
 import { isSchedulerDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
@@ -48,7 +47,7 @@ export function createWorkerRuntime(): WorkerScheduler {
     concurrency,
     enableLlmRanking,
   });
-  const convex = new ConvexHttpClient(convexUrl);
+  const convex = createWorkerConvexClient(convexUrl);
   const schedulerConfig = loadSchedulerConfigFromEnv(process.env, { convex });
   return new WorkerScheduler(orchestrator, schedulerConfig);
 }

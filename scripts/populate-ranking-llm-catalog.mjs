@@ -11,24 +11,18 @@
  *   node --env-file=.env.local scripts/populate-ranking-llm-catalog.mjs
  *   npm run populate:ranking-catalog
  *
- * Cursor has no public “list models” API; the script seeds a small curated list. Edit `CURSOR_CLI_MODELS`
- * in this file when you want more options, then re-run.
+ * Cursor has no public “list models” API; the script seeds the full list from `@job-bot/shared`
+ * (`CURSOR_CLI_CATALOG`). To refresh Convex only, run `npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog`.
  */
 
 import { ConvexHttpClient } from 'convex/browser';
+
+import { CURSOR_CLI_CATALOG } from '@job-bot/shared';
 
 import { api } from '../convex/_generated/api.js';
 
 const OPENAI_MODELS_URL = 'https://api.openai.com/v1/models';
 
-/** Curated Cursor CLI / `cursor-agent` model identifiers (extend as needed). */
-const CURSOR_CLI_MODELS = [
-  { apiModelId: 'cursor-default', displayName: 'Cursor default' },
-  { apiModelId: 'composer-1', displayName: 'Composer 1' },
-  { apiModelId: 'gpt-5.2-codex', displayName: 'GPT-5.2 Codex' },
-  { apiModelId: 'gpt-5.2', displayName: 'GPT-5.2' },
-  { apiModelId: 'claude-4.6-sonnet-medium-thinking', displayName: 'Claude 4.6 Sonnet (medium thinking)' },
-];
 
 function requireEnv(name) {
   const v = process.env[name]?.trim();
@@ -110,7 +104,7 @@ async function main() {
     },
   ];
 
-  const cursorModels = CURSOR_CLI_MODELS.map((m, index) => ({
+  const cursorModels = CURSOR_CLI_CATALOG.map((m, index) => ({
     providerKey: 'cursor',
     apiModelId: m.apiModelId,
     displayName: m.displayName,

@@ -220,10 +220,6 @@ function RankingDetails({ ranking }: RankingDetailsProps) {
       <ReasoningMarkdown value={ranking.reasoningSummary} className='posting-item__reasoning' />
       <p className='posting-item__model-line'>
         <span className='posting-item__model-label'>Model</span> {ranking.model}
-        <span className='posting-item__meta-sep' aria-hidden='true'>
-          ·
-        </span>
-        <span className='posting-item__model-label'>Rank</span> {ranking.rank}
       </p>
       <CriteriaMatchDetails value={ranking.criteriaMatchJson} />
       {ranking.redFlags && ranking.redFlags.length > 0 ? (
