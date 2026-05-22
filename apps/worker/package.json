@@ -8,9 +8,9 @@
   "scripts": {
     "dev": "npm run build && node --env-file=../../.env.local dist/index.js",
     "start": "node --env-file=../../.env.local dist/index.js",
-    "build": "npm run build --workspace=@job-bot/agent-core --prefix ../.. && tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('src/sources/linkedinScrapeInpage.js','dist/sources/linkedinScrapeInpage.js')\"",
+    "build": "npm run build --workspace=@job-bot/agent-core --prefix ../.. && tsc -p tsconfig.json && node -e \"const fs=require('node:fs');for(const f of ['linkedinScrapeInpage.js','linkedinSearchUi.js','linkedinScrapeClickTargets.js'])fs.copyFileSync('src/sources/'+f,'dist/sources/'+f)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/sources/linkedinScrapeInpage.test.js src/sources/linkedinSearchCriteria.test.js",
+    "test": "node --experimental-strip-types --test src/sources/linkedinScrapeInpage.test.js src/sources/linkedinScrapeBundle.test.js src/sources/linkedinSearchCriteria.test.js src/sources/linkedinSearchUi.test.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

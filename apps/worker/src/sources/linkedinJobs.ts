@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { JOB_BOT_POSTING_PUSH_BINDING, type ChromeDriver } from '@job-bot/agent-core';
 
 import type { Id } from '../convexBridge/doc.js';
@@ -18,6 +22,12 @@ import {
 } from './linkedinScrapeControls.js';
 
 export const JOB_BOT_SCRAPE_ABORT_MESSAGE = 'JOB_BOT_SCRAPE_ABORT';
+
+const __linkedinJobsDir = dirname(fileURLToPath(import.meta.url));
+
+function loadLinkedInSearchUiSource(): string {
+  return readFileSync(join(__linkedinJobsDir, 'linkedinSearchUi.js'), 'utf8');
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -515,87 +525,15 @@ const PREFERENCES_CLICK_SCRIPT = `(() => {
   return { error: 'SHOW_ALL_MISSING' };
 })()`;
 
-function buildLinkedInApplySearchUiExpression(search: string, location: string): string {
-  const searchJson = JSON.stringify(search);
-  const locationJson = JSON.stringify(location);
+/**
+ * Fills the LinkedIn /jobs/ search typeahead (SDUI `jobSearchBox` or legacy keyword field) and submits.
+ */
+function buildLinkedInApplySearchUiExpression(uiQuery: string): string {
+  const uiQueryJson = JSON.stringify(uiQuery);
+  const SEARCH_UI = loadLinkedInSearchUiSource();
   return `(() => {
-    const searchValue = ${searchJson};
-    const locationValue = ${locationJson};
-    const norm = (v) => (v || '').replace(/\\s+/g, ' ').trim();
-    const setInput = (input, value) => {
-      input.focus();
-      input.value = '';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      if (value) {
-        input.value = value;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    };
-    const findFirst = (selectors) => {
-      for (const selector of selectors) {
-        const found = document.querySelector(selector);
-        if (found instanceof HTMLInputElement) {
-          return { input: found, selector };
-        }
-      }
-      return null;
-    };
-    const keywordSelectors = [
-      'input[aria-label*="Search by title"]',
-      'input[aria-label*="Search jobs"]',
-      'input[id*="jobs-search-box-keyword-id"]',
-      'input[name*="keywords"]'
-    ];
-    const locationSelectors = [
-      'input[aria-label*="City"]',
-      'input[aria-label*="location"]',
-      'input[id*="jobs-search-box-location-id"]',
-      'input[name*="location"]'
-    ];
-    const keyword = findFirst(keywordSelectors);
-    const location = findFirst(locationSelectors);
-    if (!keyword && searchValue) {
-      return { ok: false, reason: 'keyword_input_missing' };
-    }
-    if (!location && locationValue) {
-      return { ok: false, reason: 'location_input_missing' };
-    }
-    if (keyword) setInput(keyword.input, searchValue);
-    if (location) setInput(location.input, locationValue);
-
-    const submitCandidates = [
-      'button[aria-label*="Search"]',
-      '.jobs-search-box__submit-button',
-      'button[type="submit"]'
-    ];
-    let submitSelector = null;
-    let submitted = false;
-    for (const selector of submitCandidates) {
-      const node = document.querySelector(selector);
-      if (node instanceof HTMLElement) {
-        node.click();
-        submitSelector = selector;
-        submitted = true;
-        break;
-      }
-    }
-    if (!submitted && keyword) {
-      keyword.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-      keyword.input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
-      submitSelector = 'keyword_enter';
-      submitted = true;
-    }
-    if (!submitted) {
-      return { ok: false, reason: 'search_submit_missing' };
-    }
-    return {
-      ok: true,
-      keywordSelector: keyword ? keyword.selector : null,
-      locationSelector: location ? location.selector : null,
-      submitSelector
-    };
+    ${SEARCH_UI}
+    return globalThis.__jobBotLiSearchUi.applyJobsSearchUi(document, ${uiQueryJson});
   })()`;
 }
 
@@ -603,8 +541,8 @@ type LinkedInUiSearchResult = {
   ok: boolean;
   reason?: string;
   keywordSelector?: string | null;
-  locationSelector?: string | null;
   submitSelector?: string | null;
+  uiQuery?: string;
 };
 
 type BundleJob = {
@@ -638,7 +576,7 @@ function bundleJobToScrapedPosting(job: BundleJob, runId: Id<'scrape_runs'>): Sc
 }
 
 type BundleOutcome =
-  | { jobs: BundleJob[]; aborted?: boolean; finishEarly?: boolean }
+  | { jobs: BundleJob[]; aborted?: boolean; finishEarly?: boolean; listNavRecoveryCount?: number }
   | { error: string }
   | { aborted: true; jobs: BundleJob[] };
 
@@ -664,18 +602,16 @@ export async function collectLinkedInPostings(params: {
     });
   }
 
-  const { search: queryRaw, location: locationRaw, geoId: geoIdRaw } =
-    resolveLinkedInSearchCriteria(params.sourceCriteria);
-  const droppedLocation =
-    geoIdRaw.length > 0 && (params.sourceCriteria?.location?.trim() ?? '').length > 0;
-  if (droppedLocation) {
+  const { search: queryRaw, location: locationRaw, uiQuery } = resolveLinkedInSearchCriteria(
+    params.sourceCriteria
+  );
+  const locationIgnored = locationRaw.length > 0 && queryRaw.length === 0;
+  if (locationIgnored) {
     workerLog.info('linkedin.criteria', {
-      message: 'geoId preferred over location; location text ignored for this run',
-      geoId: geoIdRaw,
+      message: 'location ignored because search is empty; using preferences hub',
     });
   }
-  const useSearchPath =
-    queryRaw.length > 0 || locationRaw.length > 0 || geoIdRaw.length > 0;
+  const useSearchPath = queryRaw.length > 0;
 
   const autoLogin = parseLinkedInAutoLoginFromEnv(params.env);
   if (autoLogin) {
@@ -749,76 +685,33 @@ export async function collectLinkedInPostings(params: {
 
     await injectOverlayIfNeeded();
 
-    let searchStrategyUsed: 'ui' | 'url_fallback' | 'search_url' | 'preferences_hub' =
-      'preferences_hub';
-    let fallbackReason: string | null = null;
+    let searchStrategyUsed: 'ui' | 'preferences_hub' = 'preferences_hub';
 
     if (useSearchPath) {
-      if (geoIdRaw.length > 0) {
-        const searchParams = new URLSearchParams();
-        if (queryRaw.length > 0) {
-          searchParams.set('keywords', queryRaw);
-        }
-        searchParams.set('geoId', geoIdRaw);
-        const searchUrl = `https://www.linkedin.com/jobs/search/?${searchParams.toString()}`;
-        searchStrategyUsed = 'search_url';
-        workerLog.info('linkedin.search_url', {
-          event: 'linkedin_search_url_navigate',
-          strategyUsed: searchStrategyUsed,
-          url: searchUrl,
-          hasKeywords: queryRaw.length > 0,
-          hasGeoId: true,
-        });
-        await params.driver.navigate(searchUrl, { timeoutMs: 60_000 });
-        await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
-      } else {
-        const uiResult = await params.driver.evaluate<LinkedInUiSearchResult>(
-          buildLinkedInApplySearchUiExpression(queryRaw, locationRaw)
+      const uiResult = await params.driver.evaluate<LinkedInUiSearchResult>(
+        buildLinkedInApplySearchUiExpression(uiQuery)
+      );
+      if (!uiResult.ok) {
+        throw new Error(
+          `LinkedIn UI search failed (${uiResult.reason ?? 'unknown'}). ` +
+            'Ensure the jobs search box is visible on /jobs/ and try again with WORKER_CHROME_HEADLESS=0.'
         );
-        if (uiResult.ok) {
-          searchStrategyUsed = 'ui';
-          workerLog.info('linkedin.search_ui', {
-            event: 'linkedin_search_ui_applied',
-            strategyUsed: searchStrategyUsed,
-            keywordSelector: uiResult.keywordSelector ?? null,
-            locationSelector: uiResult.locationSelector ?? null,
-            submitSelector: uiResult.submitSelector ?? null,
-            hasKeywords: queryRaw.length > 0,
-            hasLocation: locationRaw.length > 0,
-          });
-          await sleep(2800);
-          if (isScrapeDebug()) {
-            workerLog.debug('linkedin.milestone', { phase: 'after_search_ui_sleep' });
-          }
-          await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
-        } else {
-          fallbackReason = uiResult.reason ?? 'ui_search_failed';
-          const searchParams = new URLSearchParams();
-          if (queryRaw.length > 0) {
-            searchParams.set('keywords', queryRaw);
-          }
-          if (locationRaw.length > 0) {
-            searchParams.set('location', locationRaw);
-          }
-          const searchUrl = `https://www.linkedin.com/jobs/search/?${searchParams.toString()}`;
-          searchStrategyUsed = 'url_fallback';
-          workerLog.warn('linkedin.search_fallback', {
-            event: 'linkedin_search_fallback_to_url',
-            strategyUsed: searchStrategyUsed,
-            reason: fallbackReason,
-            selectorAttemptSummary: {
-              keywordSelector: uiResult.keywordSelector ?? null,
-              locationSelector: uiResult.locationSelector ?? null,
-              submitSelector: uiResult.submitSelector ?? null,
-            },
-            url: searchUrl,
-            hasKeywords: queryRaw.length > 0,
-            hasLocation: locationRaw.length > 0,
-          });
-          await params.driver.navigate(searchUrl, { timeoutMs: 60_000 });
-          await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
-        }
       }
+      searchStrategyUsed = 'ui';
+      workerLog.info('linkedin.search_ui', {
+        event: 'linkedin_search_ui_applied',
+        strategyUsed: searchStrategyUsed,
+        uiQuery,
+        keywordSelector: uiResult.keywordSelector ?? null,
+        submitSelector: uiResult.submitSelector ?? null,
+        hasSearch: queryRaw.length > 0,
+        hasLocation: locationRaw.length > 0,
+      });
+      await sleep(2800);
+      if (isScrapeDebug()) {
+        workerLog.debug('linkedin.milestone', { phase: 'after_search_ui_sleep' });
+      }
+      await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
     } else {
       if (steppingEnabled) {
         if (isScrapeDebug()) {
@@ -857,11 +750,13 @@ export async function collectLinkedInPostings(params: {
     }
 
     await injectOverlayIfNeeded();
+    const listResultsUrl = await params.driver.evaluate<string>('window.location.href');
+
     workerLog.info('linkedin.scrape', {
       event: 'linkedin_search_strategy',
       strategyUsed: searchStrategyUsed,
-      usedLinkedinUrlFallback: searchStrategyUsed === 'url_fallback',
-      fallbackReason,
+      uiQuery: useSearchPath ? uiQuery : null,
+      listResultsUrl,
       maxPages: linkedInMaxPages,
       maxPostings: linkedInMaxPostings ?? null,
       WORKER_LINKEDIN_PAGES: params.env.WORKER_LINKEDIN_PAGES ?? null,
@@ -870,7 +765,8 @@ export async function collectLinkedInPostings(params: {
     const expr = buildLinkedInJobsListScrapeExpression(
       debugMode,
       linkedInMaxPages,
-      linkedInMaxPostings
+      linkedInMaxPostings,
+      listResultsUrl
     );
     const outcome = (await params.driver.evaluate<BundleOutcome>(expr)) as BundleOutcome;
 
@@ -907,6 +803,13 @@ export async function collectLinkedInPostings(params: {
       workerLog.info('linkedin.scrape', {
         phase: 'finish_early',
         jobsCount: Array.isArray(outcome.jobs) ? outcome.jobs.length : 0,
+      });
+    }
+
+    if ('listNavRecoveryCount' in outcome && (outcome.listNavRecoveryCount ?? 0) > 0) {
+      workerLog.info('linkedin.scrape', {
+        event: 'linkedin_list_nav_recovery',
+        count: outcome.listNavRecoveryCount,
       });
     }
 
@@ -950,8 +853,7 @@ export async function collectLinkedInPostings(params: {
       },
       searchTelemetry: {
         strategyUsed: searchStrategyUsed,
-        usedLinkedinUrlFallback: searchStrategyUsed === 'url_fallback',
-        fallbackReason: fallbackReason ?? undefined,
+        usedLinkedinUrlFallback: false,
       },
     };
   } finally {

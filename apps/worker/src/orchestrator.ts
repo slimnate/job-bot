@@ -421,9 +421,7 @@ export class WorkerOrchestrator {
           this.convex.mutation(api.runs.updateStatus, {
             runId: payload.runId,
             status: 'succeeded',
-            logsSummary: collected.searchTelemetry?.usedLinkedinUrlFallback
-              ? `Completed source '${payload.source}' run with warning: LinkedIn UI search fallback to URL was used.`
-              : `Completed source '${payload.source}' run`,
+            logsSummary: `Completed source '${payload.source}' run`,
             stats: {
               discoveredCount: collected.stats.discoveredCount,
               dedupedCount: upsertResult.updated + collected.stats.dedupedCount,
@@ -433,7 +431,6 @@ export class WorkerOrchestrator {
             },
             linkedinSearchStrategy: collected.searchTelemetry?.strategyUsed,
             usedLinkedinUrlFallback: collected.searchTelemetry?.usedLinkedinUrlFallback,
-            linkedinFallbackReason: collected.searchTelemetry?.fallbackReason,
           })
         );
 

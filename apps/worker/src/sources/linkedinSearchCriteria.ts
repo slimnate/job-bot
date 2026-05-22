@@ -1,18 +1,39 @@
 export type LinkedInSearchCriteria = {
   search: string;
   location: string;
-  geoId: string;
+  /** Single keyword-box query for LinkedIn UI search (`search in location` when both set). */
+  uiQuery: string;
 };
 
 /**
- * Resolves LinkedIn run criteria for scraping. When both `geoId` and `location` are set,
- * `geoId` wins and `location` is ignored so URL/search navigation stays consistent.
+ * Builds the jobs keyword-box query. Requires a non-empty search term; location is optional.
+ * When both are set, uses `"<search> in <location>"`. Location alone returns an empty string.
+ */
+export function buildLinkedInUiSearchQuery(search: string, location: string): string {
+  const trimmedSearch = search.trim();
+  if (!trimmedSearch) {
+    return '';
+  }
+  const trimmedLocation = location.trim();
+  if (trimmedLocation) {
+    return `${trimmedSearch} in ${trimmedLocation}`;
+  }
+  return trimmedSearch;
+}
+
+/**
+ * Resolves LinkedIn run criteria. Search is optional (empty → preferences hub).
+ * Location is only applied when search is non-empty; otherwise it is ignored.
  */
 export function resolveLinkedInSearchCriteria(
   sourceCriteria?: Record<string, string>
 ): LinkedInSearchCriteria {
   const search = sourceCriteria?.search?.trim() ?? '';
-  const geoId = sourceCriteria?.geoId?.trim() ?? '';
-  const location = geoId.length > 0 ? '' : (sourceCriteria?.location?.trim() ?? '');
-  return { search, location, geoId };
+  const locationRaw = sourceCriteria?.location?.trim() ?? '';
+  const location = search.length > 0 ? locationRaw : '';
+  return {
+    search,
+    location,
+    uiQuery: buildLinkedInUiSearchQuery(search, location),
+  };
 }

@@ -4,7 +4,7 @@
 			"path": "."
 		},
 		{
-			"path": "../oc-job-capture"
+			"path": "../job-capture"
 		}
 	]
 }

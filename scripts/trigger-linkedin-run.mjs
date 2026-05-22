@@ -16,14 +16,13 @@
  *   node --env-file=.env.local scripts/trigger-linkedin-run.mjs
  *   npm run trigger:linkedin -- --query "optional keywords"
  *   npm run trigger:linkedin -- --query "optional keywords" --location "Austin, TX"
- *   npm run trigger:linkedin -- --query "optional keywords" --geo-id 90000096
  *
  * Flags:
  *   --no-start-worker     Do not import/start the worker; only queue + POST /trigger (needs a worker elsewhere).
  *   --skip-worker-build   Skip `npm run build --workspace=@job-bot/worker` before importing the worker.
  *   --no-wait             Do not poll Convex until the scrape run reaches a terminal status (exit right after trigger).
  *
- * Location: use either `--location` (free text) or `--geo-id` (LinkedIn numeric geo); if both are passed, `--geo-id` wins.
+ * --query is optional; when omitted, the preferences hub path runs ("Show all"). --location is only used with --query (combined as "<query> in <location>").
  */
 
 import { execSync } from 'node:child_process';
@@ -44,7 +43,7 @@ const REPO_ROOT = join(__dirname, '..');
 const WORKER_DIST_INDEX = join(REPO_ROOT, 'apps/worker/dist/index.js');
 
 function parseArgs(argv) {
-  /** @type {{ query?: string; location?: string; geoId?: string; noStartWorker: boolean; skipWorkerBuild: boolean; noWait: boolean }} */
+  /** @type {{ query?: string; location?: string; noStartWorker: boolean; skipWorkerBuild: boolean; noWait: boolean }} */
   const out = { noStartWorker: false, skipWorkerBuild: false, noWait: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--query' && argv[i + 1] !== undefined) {
@@ -53,9 +52,11 @@ function parseArgs(argv) {
     } else if (argv[i] === '--location' && argv[i + 1] !== undefined) {
       out.location = argv[i + 1];
       i++;
-    } else if (argv[i] === '--geo-id' && argv[i + 1] !== undefined) {
-      out.geoId = argv[i + 1];
-      i++;
+    } else if (argv[i] === '--geo-id') {
+      console.warn('--geo-id is no longer supported; use --location (free text) instead.');
+      if (argv[i + 1] !== undefined) {
+        i++;
+      }
     } else if (argv[i] === '--no-start-worker') {
       out.noStartWorker = true;
     } else if (argv[i] === '--skip-worker-build') {
@@ -260,19 +261,15 @@ async function main() {
       console.log('Worker trigger already reachable; using existing worker process.');
     }
 
-    if (options.location !== undefined && options.geoId !== undefined) {
-      console.warn('Both --location and --geo-id were set; using --geo-id and ignoring --location.');
-    }
-
     /** @type {Record<string, string>} */
     const sourceCriteria = {};
     if (options.query !== undefined) {
       sourceCriteria.search = options.query;
     }
-    if (options.geoId !== undefined) {
-      sourceCriteria.geoId = options.geoId;
-    } else if (options.location !== undefined) {
+    if (options.location !== undefined && options.query !== undefined) {
       sourceCriteria.location = options.location;
+    } else if (options.location !== undefined && options.query === undefined) {
+      console.warn('--location is ignored without --query; using preferences hub.');
     }
 
     const payload = {

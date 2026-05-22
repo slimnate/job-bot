@@ -14,26 +14,39 @@ function loadLinkedInScrapeInpageSource(): string {
   return readFileSync(join(__dirname, 'linkedinScrapeInpage.js'), 'utf8');
 }
 
+function loadLinkedInScrapeClickTargetsSource(): string {
+  return readFileSync(join(__dirname, 'linkedinScrapeClickTargets.js'), 'utf8');
+}
+
 /**
  * Browser-side async scrape for LinkedIn jobs search results (split-pane list/detail).
  * Ported from oc-job-capture/popup.js executeLinkExtraction patterns + read-more expansion.
  *
  * @param maxPages How many results pages to walk (clamped by the caller, typically from `WORKER_LINKEDIN_PAGES`).
  * @param maxCollectedJobs Optional cap for collected postings; when undefined, collection is unbounded.
+ * @param listResultsUrl URL to return to after accidental full-page /jobs/view/ navigation (geo + default paths).
  */
 export function buildLinkedInJobsListScrapeExpression(
   debugMode: LinkedInDebugSteps,
   maxPages: number,
-  maxCollectedJobs: number | undefined
+  maxCollectedJobs: number | undefined,
+  listResultsUrl?: string
 ): string {
   const DEBUG = JSON.stringify(debugMode);
   const pages = Math.max(1, Math.floor(maxPages));
   const maxCollectedJobsLiteral =
     maxCollectedJobs === undefined ? 'null' : String(Math.max(1, Math.floor(maxCollectedJobs)));
+  const listResultsUrlLiteral =
+    listResultsUrl && listResultsUrl.trim().length > 0
+      ? JSON.stringify(listResultsUrl.trim())
+      : 'null';
   const INPAGE = loadLinkedInScrapeInpageSource();
+  const CLICK_TARGETS = loadLinkedInScrapeClickTargetsSource();
   return `(async () => {
     ${INPAGE}
+    ${CLICK_TARGETS}
     const li = globalThis.__jobBotLiScrape;
+    const ct = globalThis.__jobBotLiClickTargets;
     const DEBUG = ${DEBUG};
     const MAX_PAGES = ${pages};
     const MAX_COLLECTED_JOBS = ${maxCollectedJobsLiteral};
@@ -135,91 +148,34 @@ export function buildLinkedInJobsListScrapeExpression(
       );
     }
 
-    const getScrollableResultsContainer = () => {
-      const selectors = [
-        '.scaffold-layout__list',
-        '.jobs-search-results-list',
-        '.jobs-search__results-list',
-        '.scaffold-layout__list-container',
-        'ul[role="list"]',
-      ];
-      for (const selector of selectors) {
-        const el = document.querySelector(selector);
-        if (el && el.scrollHeight > el.clientHeight + 80) return el;
-      }
-      return null;
+    const LIST_RESULTS_URL = ${listResultsUrlLiteral};
+    let listNavRecoveryCount = 0;
+
+    const getScrollableResultsContainer = () => ct.getScrollableResultsContainer(document);
+    const getClickableTargets = () => ct.getClickableTargets(document);
+
+    const isFullJobViewPathname = () => {
+      const path = window.location.pathname || '';
+      if (!/^\\/jobs\\/view\\/\\d+/i.test(path)) return false;
+      return !/^\\/jobs\\/search\\/?/i.test(path);
     };
 
-    const getClickableTargets = () => {
-      const targetSelectors = [
-        'div[data-testid="lazy-column"] div[role="button"][componentkey]',
-        'div[role="button"][componentkey]',
-        '.scaffold-layout__list a[href*="/jobs/view/"]',
-        '.jobs-search-results-list a[href*="/jobs/view/"]',
-        '.jobs-search__results-list a[href*="/jobs/view/"]',
-        '.scaffold-layout__list a[href*="currentJobId="]',
-        '.jobs-search-results-list a[href*="currentJobId="]',
-        '.jobs-search__results-list a[href*="currentJobId="]',
-        'li[data-occludable-job-id] a',
-        'li[data-job-id] a',
-        'li[data-occludable-job-id]',
-        'li[data-job-id]',
-        '[data-occludable-job-id]',
-        '[data-job-id]',
-        'a.job-card-list__title',
-        'a[data-control-name*="job"]',
-      ];
-      const seen = new Set();
-      const targets = [];
-
-      const toClickableNode = (node) => {
-        if (!node) return null;
-        if (node.matches && node.matches('a, button')) return node;
-        const nestedAnchor = node.querySelector?.(
-          'a[href*="/jobs/view/"], a[href*="currentJobId="], a[data-control-name*="job"], a'
-        );
-        if (nestedAnchor) return nestedAnchor;
-        return node;
-      };
-
-      const isLikelyJobCardButton = (node) => {
-        if (!node || !node.matches || !node.matches('div[role="button"][componentkey]')) return false;
-        const componentKey = node.getAttribute('componentkey') || '';
-        const hasUuidLikeComponentKey = /^[0-9a-f-]{24,}$/i.test(componentKey);
-        const hasDismissButton = Boolean(node.querySelector('button[aria-label^="Dismiss "]'));
-        const textLength = (node.textContent || '').trim().length;
-        return hasUuidLikeComponentKey && hasDismissButton && textLength > 40;
-      };
-
-      for (const selector of targetSelectors) {
-        for (const node of Array.from(document.querySelectorAll(selector))) {
-          const clickableNode = toClickableNode(node);
-          if (!clickableNode) continue;
-          if (clickableNode.matches?.('div[role="button"][componentkey]') && !isLikelyJobCardButton(clickableNode)) {
-            continue;
-          }
-          const href = clickableNode.getAttribute('href') || clickableNode.href || '';
-          const nodeJobId =
-            node.getAttribute?.('data-occludable-job-id') || node.getAttribute?.('data-job-id') || '';
-          const componentKey = clickableNode.getAttribute?.('componentkey') || '';
-          const key =
-            selector +
-            '::' +
-            href +
-            '::' +
-            nodeJobId +
-            '::' +
-            componentKey +
-            '::' +
-            (clickableNode.textContent || '').trim().slice(0, 180);
-          if (!seen.has(key)) {
-            seen.add(key);
-            targets.push(clickableNode);
-          }
+    /** Returns to split-pane search URL when a click navigated to a standalone job view page. */
+    async function recoverListResultsIfNeeded(jobIdForUrl) {
+      if (!LIST_RESULTS_URL || !isFullJobViewPathname()) return false;
+      try {
+        const url = new URL(LIST_RESULTS_URL, window.location.origin);
+        if (jobIdForUrl && /^\\d+$/.test(String(jobIdForUrl))) {
+          url.searchParams.set('currentJobId', String(jobIdForUrl));
         }
+        window.location.assign(url.toString());
+        listNavRecoveryCount += 1;
+        await sleep(2400);
+        return true;
+      } catch (e) {
+        return false;
       }
-      return targets;
-    };
+    }
 
     const clickJobsNextPage = () => {
       const candidates = Array.from(document.querySelectorAll('button, a'));
@@ -241,6 +197,10 @@ export function buildLinkedInJobsListScrapeExpression(
     };
 
     try {
+      if (LIST_RESULTS_URL && isFullJobViewPathname()) {
+        await recoverListResultsIfNeeded(null);
+      }
+
       for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex += 1) {
         {
           const st = scrapeStopped();
@@ -302,6 +262,15 @@ export function buildLinkedInJobsListScrapeExpression(
               if (st) return st;
             }
 
+            const preDetailsJobId = li.getCurrentJobId(window);
+            if (await recoverListResultsIfNeeded(preDetailsJobId)) {
+              {
+                const st = scrapeStopped();
+                if (st) return st;
+              }
+              continue;
+            }
+
             const detailRoot = li.findJobDetailRoot(document);
             const about = detailRoot
               ? Array.from(detailRoot.querySelectorAll('h2')).find(
@@ -355,6 +324,7 @@ export function buildLinkedInJobsListScrapeExpression(
                 pageIndex: pageIndex,
                 round: round,
                 extractionDiagnostics: details.extractionDiagnostics,
+                listNavRecoveryCount: listNavRecoveryCount,
               },
             };
             collected.push(jobRecord);
@@ -400,7 +370,12 @@ export function buildLinkedInJobsListScrapeExpression(
       if (collected.length === 0) {
         return { error: 'No job posting details were found on this page.' };
       }
-      return { jobs: collected, aborted: aborted(), finishEarly: false };
+      return {
+        jobs: collected,
+        aborted: aborted(),
+        finishEarly: false,
+        listNavRecoveryCount: listNavRecoveryCount,
+      };
     } catch (e) {
       const msg = e && e.message ? e.message : String(e);
       if (msg.includes('JOB_BOT_SCRAPE_ABORT')) {

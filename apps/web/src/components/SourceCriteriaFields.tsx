@@ -1,23 +1,3 @@
-const LOCATION_GEO_FIELDS = new Set(['location', 'geoId']);
-
-/**
- * Applies LinkedIn location / geoId mutual exclusion when editing criteria inline.
- */
-export function applySourceCriteriaFieldChange(
-  prev: Record<string, string>,
-  field: string,
-  value: string
-): Record<string, string> {
-  const next = { ...prev, [field]: value };
-  if (field === 'location' && value.trim()) {
-    next.geoId = '';
-  }
-  if (field === 'geoId' && value.trim()) {
-    next.location = '';
-  }
-  return next;
-}
-
 type SourceCriteriaFieldsProps = {
   fields: string[];
   values: Record<string, string>;
@@ -29,13 +9,13 @@ type SourceCriteriaFieldsProps = {
 
 function partitionCriteriaFields(fields: string[]) {
   const search = fields.includes('search') ? (['search'] as const) : [];
-  const locationPair = (['location', 'geoId'] as const).filter((field) => fields.includes(field));
-  const rest = fields.filter((field) => field !== 'search' && !LOCATION_GEO_FIELDS.has(field));
-  return { search, locationPair, rest };
+  const location = fields.includes('location') ? (['location'] as const) : [];
+  const rest = fields.filter((field) => field !== 'search' && field !== 'location');
+  return { search, location, rest };
 }
 
 /**
- * Renders source criteria inputs: `search` spans the full row; `location` and `geoId` share one row.
+ * Renders source criteria inputs. `search` and `location` share a row on large screens (stacked on small).
  */
 export function SourceCriteriaFields({
   fields,
@@ -44,10 +24,10 @@ export function SourceCriteriaFields({
   variant = 'labeled',
   className,
 }: SourceCriteriaFieldsProps) {
-  const { search, locationPair, rest } = partitionCriteriaFields(fields);
+  const { search, location, rest } = partitionCriteriaFields(fields);
 
   const onFieldChange = (field: string, value: string) => {
-    onChange(applySourceCriteriaFieldChange(values, field, value));
+    onChange({ ...values, [field]: value });
   };
 
   const renderInput = (field: string, fullWidth: boolean) => {
@@ -82,12 +62,23 @@ export function SourceCriteriaFields({
     );
   };
 
-  const rootClass = ['source-criteria-fields', className].filter(Boolean).join(' ');
+  const hasSearchOrLocation = search.length > 0 || location.length > 0;
+  const rootClass = [
+    'source-criteria-fields',
+    variant === 'compact' ? 'source-criteria-fields--compact' : '',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div className={rootClass}>
-      {search.map((field) => renderInput(field, true))}
-      {locationPair.map((field) => renderInput(field, false))}
+      {hasSearchOrLocation ? (
+        <div className='source-criteria-search-location'>
+          {search.map((field) => renderInput(field, false))}
+          {location.map((field) => renderInput(field, false))}
+        </div>
+      ) : null}
       {rest.map((field) => renderInput(field, true))}
     </div>
   );

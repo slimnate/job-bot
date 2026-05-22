@@ -25,8 +25,8 @@ export type ScrapeResult = {
   postings: ScrapedPostingInput[];
   stats: ScrapeStats;
   searchTelemetry?: {
-    strategyUsed: 'ui' | 'url_fallback' | 'search_url' | 'preferences_hub';
+    strategyUsed: 'ui' | 'preferences_hub';
+    /** Kept for Convex telemetry shape; always false (URL search fallback removed). */
     usedLinkedinUrlFallback: boolean;
-    fallbackReason?: string;
   };
 };

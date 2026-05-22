@@ -33,7 +33,7 @@ export default defineSchema({
     source: v.string(),
     /**
      * Source-specific run criteria (validated by backend source contract).
-     * Example for LinkedIn: { search?, location? } or { search?, geoId? }; when both location and geoId are set, geoId wins.
+     * Example for LinkedIn: { search?, location? } — combined in the UI keyword box as "search in location".
      */
     sourceCriteria: v.optional(v.record(v.string(), v.string())),
     linkedinSearchStrategy: v.optional(
@@ -129,7 +129,7 @@ export default defineSchema({
 
   /**
    * User-managed reusable criteria combinations for a source.
-   * For LinkedIn: `search`, and either `location` (text) or `geoId` (numeric), not both.
+   * For LinkedIn: optional `search`; optional `location` (only used when search is set).
    */
   source_presets: defineTable({
     source: v.string(),
