@@ -19,9 +19,9 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
   - log detail modal with table-first view, **per-level filters** (debug / info / warn / error), and raw JSON
 - Sources (`/sources`, `apps/web/src/components/SourcesManager.tsx`) with:
-  - source enable/disable
+  - source **Enabled** on/off toggle (disabled sources are omitted from the queue source picker)
   - read-only accepted criteria fields (code-defined contracts)
-  - source preset management — create, edit, duplicate, and delete reusable criteria combinations per source
+  - source preset management — **Add preset** opens the criteria form; **Edit** / **Duplicate** open it prefilled; create, edit, duplicate, and delete reusable criteria combinations per source
 - Convex backend with schema + APIs for:
   - Evaluator management (`convex/evaluators.ts`)
   - Source management (`convex/sources.ts`)

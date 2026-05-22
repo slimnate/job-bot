@@ -4,6 +4,8 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
+import { PlusIcon } from './PlusIcon.js';
+
 type EvaluatorDoc = Doc<'job_evaluators'>;
 
 type EvaluatorFormState = {
@@ -145,7 +147,8 @@ export function EvaluatorsEditor() {
       <div className='criteria-editor-layout'>
         <aside className='criteria-profile-sidebar'>
           <div className='criteria-profile-sidebar-actions'>
-            <button type='button' onClick={onNewProfile}>
+            <button type='button' className='btn-with-icon' onClick={onNewProfile}>
+              <PlusIcon />
               New evaluator
             </button>
           </div>

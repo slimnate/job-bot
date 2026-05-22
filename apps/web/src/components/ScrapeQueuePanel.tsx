@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
+import { PlusIcon } from './PlusIcon.js';
 import { SourceCriteriaFields } from './SourceCriteriaFields.js';
 
 const formatDateTime = (timestamp: number): string => new Date(timestamp).toLocaleString();
@@ -273,7 +274,13 @@ export function ScrapeQueuePanel() {
             </select>
           </label>
           <div className='queue-add-actions'>
-            <button type='button' onClick={onAddToQueue} disabled={isAdding}>
+            <button
+              type='button'
+              className='btn-with-icon'
+              onClick={onAddToQueue}
+              disabled={isAdding}
+            >
+              {!isAdding ? <PlusIcon /> : null}
               {isAdding ? 'Adding…' : 'Add to queue'}
             </button>
           </div>

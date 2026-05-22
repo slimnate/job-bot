@@ -4,6 +4,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
+import { PlusIcon } from './PlusIcon.js';
 import { SourceCriteriaFields } from './SourceCriteriaFields.js';
 
 type SourceRow = {
@@ -15,6 +16,8 @@ type SourceRow = {
 };
 
 type SourcePreset = Doc<'source_presets'>;
+
+type PresetFormMode = 'closed' | 'create' | 'edit';
 
 function emptyCriteriaForFields(fields: string[]): Record<string, string> {
   const next: Record<string, string> = {};
@@ -46,19 +49,10 @@ export function SourcesManager() {
   const [draftName, setDraftName] = useState('');
   const [draftValues, setDraftValues] = useState<Record<string, string>>({});
   const [editingPresetId, setEditingPresetId] = useState<Id<'source_presets'> | null>(null);
+  const [presetFormMode, setPresetFormMode] = useState<PresetFormMode>('closed');
   const [message, setMessage] = useState('');
 
   const acceptedFields = source?.acceptedCriteriaFields ?? [];
-
-  const syncDraftFields = (fields: string[]) => {
-    setDraftValues((prev) => {
-      const next: Record<string, string> = {};
-      for (const field of fields) {
-        next[field] = prev[field] ?? '';
-      }
-      return next;
-    });
-  };
 
   const onToggleSource = async (row: SourceRow) => {
     setMessage('');
@@ -82,10 +76,20 @@ export function SourcesManager() {
     }
   };
 
+  /** Clears the preset draft and closes the add/edit form. */
   const resetPresetDraft = () => {
+    setPresetFormMode('closed');
     setEditingPresetId(null);
     setDraftName('');
     setDraftValues(emptyCriteriaForFields(acceptedFields));
+  };
+
+  const onAddPreset = () => {
+    setPresetFormMode('create');
+    setEditingPresetId(null);
+    setDraftName('');
+    setDraftValues(emptyCriteriaForFields(acceptedFields));
+    setMessage('');
   };
 
   const onSavePreset = async () => {
@@ -95,7 +99,7 @@ export function SourcesManager() {
     setMessage('');
     const name = draftName.trim() || 'Untitled preset';
     try {
-      if (editingPresetId) {
+      if (presetFormMode === 'edit' && editingPresetId) {
         await updatePreset({
           id: editingPresetId,
           name,
@@ -116,7 +120,7 @@ export function SourcesManager() {
       setMessage(
         error instanceof Error
           ? error.message
-          : editingPresetId
+          : presetFormMode === 'edit'
             ? 'Could not update preset.'
             : 'Could not create preset.'
       );
@@ -141,6 +145,7 @@ export function SourcesManager() {
   };
 
   const onEditPreset = (preset: SourcePreset) => {
+    setPresetFormMode('edit');
     setEditingPresetId(preset._id);
     setDraftName(preset.name);
     const next = emptyCriteriaForFields(acceptedFields);
@@ -152,6 +157,7 @@ export function SourcesManager() {
   };
 
   const onUsePresetAsDraft = (preset: SourcePreset) => {
+    setPresetFormMode('create');
     setEditingPresetId(null);
     setDraftName(`${preset.name} copy`);
     const next = emptyCriteriaForFields(acceptedFields);
@@ -186,8 +192,7 @@ export function SourcesManager() {
                   }
                   onClick={() => {
                     setSelectedSource(row.source);
-                    setEditingPresetId(null);
-                    syncDraftFields(row.acceptedCriteriaFields);
+                    resetPresetDraft();
                   }}
                 >
                   <span className='criteria-profile-name'>{row.displayName}</span>
@@ -201,9 +206,23 @@ export function SourcesManager() {
             <p className='field-hint'>Loading sources...</p>
           ) : (
             <>
-              <div className='actions'>
-                <button type='button' onClick={() => void onToggleSource(source)}>
-                  {source.isEnabled ? 'Disable source' : 'Enable source'}
+              <div
+                className='evaluator-inline-field evaluator-inline-field--active'
+                title='When off, this source cannot be selected when adding runs to the queue.'
+              >
+                <span className='evaluator-inline-label'>Enabled</span>
+                <button
+                  type='button'
+                  className={source.isEnabled ? 'toggle-pill active' : 'toggle-pill'}
+                  role='switch'
+                  aria-checked={source.isEnabled}
+                  aria-label='Enable or disable this source'
+                  onClick={() => void onToggleSource(source)}
+                >
+                  <span className='toggle-pill-track'>
+                    <span className='toggle-pill-thumb' />
+                  </span>
+                  <span className='toggle-pill-text'>{source.isEnabled ? 'On' : 'Off'}</span>
                 </button>
               </div>
               <p className='field-hint'>
@@ -228,36 +247,43 @@ export function SourcesManager() {
                   evaluator → this source default → <code>WORKER_DEFAULT_EVALUATOR_ID</code>.
                 </span>
               </label>
-              <div className='form-grid'>
-                <label className='full-width'>
-                  Preset name
-                  <input
-                    value={draftName}
-                    onChange={(event) => setDraftName(event.target.value)}
-                    placeholder='e.g. React Developer in Austin, TX'
-                  />
-                </label>
-                <SourceCriteriaFields
-                  fields={acceptedFields}
-                  values={draftValues}
-                  onChange={setDraftValues}
-                />
-                {editingPresetId ? (
-                  <p className='field-hint full-width'>
-                    Editing preset — changes apply when you click Update preset.
-                  </p>
-                ) : null}
-                <div className='actions full-width'>
-                  <button type='button' onClick={() => void onSavePreset()}>
-                    {editingPresetId ? 'Update preset' : 'Save preset'}
+              {presetFormMode === 'closed' ? (
+                <div className='actions'>
+                  <button type='button' className='btn-with-icon' onClick={onAddPreset}>
+                    <PlusIcon />
+                    Add preset
                   </button>
-                  {editingPresetId ? (
+                </div>
+              ) : (
+                <div className='form-grid'>
+                  <label className='full-width'>
+                    Preset name
+                    <input
+                      value={draftName}
+                      onChange={(event) => setDraftName(event.target.value)}
+                      placeholder='e.g. React Developer in Austin, TX'
+                    />
+                  </label>
+                  <SourceCriteriaFields
+                    fields={acceptedFields}
+                    values={draftValues}
+                    onChange={setDraftValues}
+                  />
+                  {presetFormMode === 'edit' ? (
+                    <p className='field-hint full-width'>
+                      Editing preset — changes apply when you click Update preset.
+                    </p>
+                  ) : null}
+                  <div className='actions full-width'>
+                    <button type='button' onClick={() => void onSavePreset()}>
+                      {presetFormMode === 'edit' ? 'Update preset' : 'Save preset'}
+                    </button>
                     <button type='button' onClick={resetPresetDraft}>
                       Cancel
                     </button>
-                  ) : null}
+                  </div>
                 </div>
-              </div>
+              )}
               <div className='table-wrapper'>
                 <table>
                   <thead>
@@ -289,7 +315,7 @@ export function SourcesManager() {
                             <button
                               type='button'
                               onClick={() => onEditPreset(preset)}
-                              aria-pressed={editingPresetId === preset._id}
+                              aria-pressed={presetFormMode === 'edit' && editingPresetId === preset._id}
                             >
                               Edit
                             </button>
