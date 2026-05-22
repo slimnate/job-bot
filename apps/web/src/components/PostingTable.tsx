@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatHumanizedTime } from '../lib/time';
+import {
+  parseReasoningScoreTable,
+  scoreCellToPercent,
+  toPillItems,
+} from '../lib/parseReasoningScoreTable.js';
 import type { Doc } from '../../../../convex/_generated/dataModel.js';
 
 export type PostingTableRow = Doc<'job_postings'> & {
@@ -18,6 +23,14 @@ const formatDateTime = (timestamp?: number): string => {
 /**
  * Maps score ranges to semantic color classes for quick scanning.
  */
+/** Formats the headline overall score with a /100 suffix when ranked. */
+const formatOverallScore = (score?: number | null): string => {
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return '-';
+  }
+  return `${score}/100`;
+};
+
 const getScoreColorClass = (score?: number | null): string => {
   if (typeof score !== 'number' || Number.isNaN(score)) {
     return 'posting-item__score--neutral';
@@ -56,7 +69,6 @@ type PostingDescriptionProps = {
 
 /**
  * Compact description line with optional expand/collapse when the snippet is longer than the preview cap.
- * Preserves line breaks from the scraper when showing the full text.
  */
 function PostingDescription({ descriptionSnippet }: PostingDescriptionProps) {
   const { preview, full } = formatDescriptionPreview(descriptionSnippet);
@@ -96,93 +108,6 @@ function PostingDescription({ descriptionSnippet }: PostingDescriptionProps) {
   );
 }
 
-/**
- * Normalizes unknown arrays into display-ready string items.
- */
-const toPillItems = (value: unknown): string[] => {
-  let rawValue = value;
-  if (typeof rawValue === 'string') {
-    const trimmed = rawValue.trim();
-    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-      try {
-        rawValue = JSON.parse(trimmed);
-      } catch {
-        return [];
-      }
-    } else {
-      return [];
-    }
-  }
-  if (!Array.isArray(rawValue)) {
-    return [];
-  }
-  return rawValue
-    .map((item) => {
-      if (typeof item === 'string') {
-        return item.trim();
-      }
-      if (item === null || item === undefined) {
-        return '';
-      }
-      return String(item).trim();
-    })
-    .filter(Boolean);
-};
-
-/**
- * Renders `criteriaMatchJson` as compact labeled lines when it is a non-array object.
- */
-function CriteriaMatchDetails({ value }: { value: unknown }) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  const entries = Object.entries(value as Record<string, unknown>).filter(
-    ([, v]) => v !== undefined && v !== null && v !== ''
-  );
-  if (entries.length === 0) {
-    return null;
-  }
-  return (
-    <div className='posting-item__criteria'>
-      {entries.map(([key, val]) => (
-        <div key={key} className='posting-item__criteria-row'>
-          {key === 'matched' || key === 'unmet' ? null : (
-            <span className='posting-item__criteria-key'>{key}</span>
-          )}
-          {key === 'matched' || key === 'unmet' ? (
-            (() => {
-              const pillItems = toPillItems(val);
-              if (pillItems.length === 0) {
-                return <span className='posting-item__criteria-val'>-</span>;
-              }
-              return (
-                <span className='posting-item__criteria-badge-list'>
-                  {pillItems.map((item, index) => (
-                    <span
-                      key={`${key}-${item}-${index}`}
-                      className={`posting-item__criteria-badge posting-item__criteria-badge--${key}`}
-                    >
-                      {item}
-                    </span>
-                  ))}
-                </span>
-              );
-            })()
-          ) : (
-            <span className='posting-item__criteria-val'>
-              {typeof val === 'object' ? JSON.stringify(val) : String(val)}
-            </span>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-type RankingDetailsProps = {
-  ranking: Doc<'job_rankings'> | null;
-};
-
 type ReasoningMarkdownProps = {
   value?: string | null;
   className?: string;
@@ -203,8 +128,182 @@ function ReasoningMarkdown({ value, className }: ReasoningMarkdownProps) {
   );
 }
 
+type ReasoningScoreTableProps = {
+  reasoningSummary: string;
+};
+
 /**
- * Third row of each posting card: model, reasoning, criteria breakdown, red flags.
+ * Fallback when reasoning has no parseable GFM table (legacy or non-standard output).
+ */
+function ReasoningFallback({ content }: { content: string }) {
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  if (!content) {
+    return null;
+  }
+  if (content.length <= 200) {
+    return <ReasoningMarkdown value={content} className='posting-item__reasoning' />;
+  }
+  return (
+    <div className='posting-item__reasoning-fallback'>
+      {reasoningExpanded ? (
+        <ReasoningMarkdown value={content} className='posting-item__reasoning' />
+      ) : (
+        <p className='posting-item__reasoning-preview'>{`${content.slice(0, 199)}…`}</p>
+      )}
+      <button
+        type='button'
+        className='posting-item__description-toggle'
+        onClick={() => setReasoningExpanded((v) => !v)}
+        aria-expanded={reasoningExpanded}
+      >
+        {reasoningExpanded ? 'Show less reasoning' : 'Show reasoning'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Compact rubric table: criteria names as column headers, scores in one row; expand for vertical details table.
+ */
+function ReasoningScoreTable({ reasoningSummary }: ReasoningScoreTableProps) {
+  const [expanded, setExpanded] = useState(false);
+  const parsed = useMemo(() => parseReasoningScoreTable(reasoningSummary), [reasoningSummary]);
+
+  if (!parsed) {
+    return <ReasoningFallback content={reasoningSummary.trim()} />;
+  }
+
+  const { rows, remainderMarkdown } = parsed;
+
+  return (
+    <div className='posting-item__score-table-wrap'>
+      {expanded ? (
+        <table className='posting-score-table posting-score-table--expanded'>
+          <thead>
+            <tr>
+              <th scope='col'>Criteria</th>
+              <th scope='col'>Score</th>
+              <th scope='col'>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={`${row.name}-${index}`}>
+                <td>{row.name}</td>
+                <td className={getScoreColorClass(scoreCellToPercent(row.score))}>{row.score}</td>
+                <td>{row.details ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className='posting-score-table-scroll'>
+            <table className='posting-score-table posting-score-table--compact'>
+              <thead>
+                <tr>
+                  {rows.map((row, index) => (
+                    <th key={`${row.name}-${index}`} scope='col'>
+                      {row.name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  {rows.map((row, index) => (
+                    <td
+                      key={`${row.name}-${index}-score`}
+                      className={getScoreColorClass(scoreCellToPercent(row.score))}
+                    >
+                      {row.score}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+        </div>
+      )}
+      <button
+        type='button'
+        className='posting-item__description-toggle'
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        {expanded ? 'Hide full scoring table' : 'Show full scoring table'}
+      </button>
+      {remainderMarkdown ? (
+        <ReasoningMarkdown value={remainderMarkdown} className='posting-item__reasoning posting-item__reasoning--remainder' />
+      ) : null}
+    </div>
+  );
+}
+
+type CollapsibleBadgeRowProps = {
+  label: string;
+  items: string[];
+  badgeClass: string;
+};
+
+/**
+ * Single-line flag badges with "+N more" expander when multiple items exist.
+ */
+function CollapsibleBadgeRow({ label, items, badgeClass }: CollapsibleBadgeRowProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  const hiddenCount = expanded ? 0 : Math.max(0, items.length - 1);
+  const visibleItems = expanded ? items : items.slice(0, 1);
+
+  return (
+    <div
+      className={`posting-flag-row ${expanded ? 'posting-flag-row--expanded' : 'posting-flag-row--collapsed'}`}
+      aria-label={label}
+    >
+      <span className='posting-flag-row__label'>{label}</span>
+      <span className='posting-flag-row__badges'>
+        {visibleItems.map((item, index) => (
+          <span
+            key={`${item}-${index}`}
+            className={`posting-item__criteria-badge posting-item__criteria-badge--${badgeClass}`}
+            title={item}
+          >
+            {item}
+          </span>
+        ))}
+        {hiddenCount > 0 ? (
+          <button
+            type='button'
+            className='posting-flag-row__more posting-item__criteria-badge'
+            onClick={() => setExpanded(true)}
+            aria-expanded={false}
+          >
+            {hiddenCount} more
+          </button>
+        ) : null}
+        {expanded && items.length > 1 ? (
+          <button
+            type='button'
+            className='posting-flag-row__more posting-item__criteria-badge'
+            onClick={() => setExpanded(false)}
+            aria-expanded={true}
+          >
+            Show less
+          </button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+type RankingDetailsProps = {
+  ranking: Doc<'job_rankings'> | null;
+};
+
+/**
+ * Ranking section: compact score table, collapsible flags, model, criteria pills, remainder prose.
  */
 function RankingDetails({ ranking }: RankingDetailsProps) {
   if (!ranking) {
@@ -215,22 +314,24 @@ function RankingDetails({ ranking }: RankingDetailsProps) {
     );
   }
 
+  const criteriaMatch =
+    ranking.criteriaMatchJson && typeof ranking.criteriaMatchJson === 'object' && !Array.isArray(ranking.criteriaMatchJson)
+      ? (ranking.criteriaMatchJson as Record<string, unknown>)
+      : null;
+
+  const matchedItems = criteriaMatch ? toPillItems(criteriaMatch.matched) : [];
+  const unmetItems = criteriaMatch ? toPillItems(criteriaMatch.unmet) : [];
+  const redFlagItems = ranking.redFlags ?? [];
+
   return (
     <div className='posting-item__ranking'>
-      <ReasoningMarkdown value={ranking.reasoningSummary} className='posting-item__reasoning' />
+      <ReasoningScoreTable reasoningSummary={ranking.reasoningSummary} />
+      <CollapsibleBadgeRow label='Green flags' items={matchedItems} badgeClass='matched' />
+      <CollapsibleBadgeRow label='Yellow flags' items={unmetItems} badgeClass='unmet' />
+      <CollapsibleBadgeRow label='Red flags' items={redFlagItems} badgeClass='red' />
       <p className='posting-item__model-line'>
         <span className='posting-item__model-label'>Model</span> {ranking.model}
       </p>
-      <CriteriaMatchDetails value={ranking.criteriaMatchJson} />
-      {ranking.redFlags && ranking.redFlags.length > 0 ? (
-        <div className='posting-item__red-flags' aria-label='Red flags'>
-          {ranking.redFlags.map((flag, index) => (
-            <span key={`${flag}-${index}`} className='posting-item__criteria-badge posting-item__criteria-badge--red'>
-              {flag}
-            </span>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -244,7 +345,6 @@ type PostingTableProps = {
   onOpenScoreDialog?: (posting: PostingTableRow) => void;
   selectedPostingIds?: Set<string>;
   onTogglePostingSelection?: (postingId: string, checked: boolean) => void;
-  onToggleSelectAllVisible?: (checked: boolean) => void;
 };
 
 export function PostingTable({
@@ -255,15 +355,11 @@ export function PostingTable({
   onOpenScoreDialog,
   selectedPostingIds,
   onTogglePostingSelection,
-  onToggleSelectAllVisible,
 }: PostingTableProps) {
   const showActions = Boolean(onDeletePosting || onOpenScoreDialog);
   const showSelection = Boolean(onTogglePostingSelection);
   const [selectedPostingId, setSelectedPostingId] = useState<string | null>(null);
   const [rawJsonCopyStatus, setRawJsonCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
-  const allVisibleSelected = Boolean(
-    postings?.length && postings.every((posting) => selectedPostingIds?.has(posting._id))
-  );
   const selectedPosting = useMemo(
     () => postings?.find((posting) => posting._id === selectedPostingId) ?? null,
     [postings, selectedPostingId]
@@ -313,19 +409,6 @@ export function PostingTable({
   return (
     <>
       <div className='table-wrapper'>
-        {showSelection ? (
-          <div className='posting-list-toolbar'>
-            <label className='posting-list-select-all'>
-              <input
-                type='checkbox'
-                aria-label='Select all visible postings'
-                checked={allVisibleSelected}
-                onChange={(event) => onToggleSelectAllVisible?.(event.target.checked)}
-              />
-              <span>Select all visible</span>
-            </label>
-          </div>
-        ) : null}
         {hasRows ? (
           <ul className='posting-list'>
             {postings!.map((posting) => {
@@ -378,10 +461,15 @@ export function PostingTable({
                     ) : null}
                     <div className='posting-item__meta'>
                       <span className={`posting-item__meta-field posting-item__meta-score ${scoreColorClass}`}>
-                        {scoreOverall ?? '-'}
+                        {formatOverallScore(scoreOverall)}
                       </span>
                       <span className='posting-item__meta-field posting-item__meta-role-company'>
-                        <a href={posting.url} target='_blank' rel='noreferrer'>
+                        <a
+                          className='posting-external-link'
+                          href={posting.url}
+                          target='_blank'
+                          rel='noreferrer'
+                        >
                           {posting.title}
                         </a>
                         {` - ${posting.company}`}
@@ -456,7 +544,12 @@ export function PostingTable({
                 <dd>{selectedPosting.scrapeRunId ?? '-'}</dd>
                 <dt>URL</dt>
                 <dd>
-                  <a href={selectedPosting.url} target='_blank' rel='noreferrer'>
+                  <a
+                    className='posting-external-link'
+                    href={selectedPosting.url}
+                    target='_blank'
+                    rel='noreferrer'
+                  >
                     {selectedPosting.url}
                   </a>
                 </dd>

@@ -8,6 +8,7 @@ import { formatRankRunLogLine, subscribeRankRunLogs } from '../rankRunLog.js';
 import { PostingTable, type PostingTableRow } from './PostingTable';
 
 type PostingSort = 'discoveredAtDesc' | 'postedAtDesc' | 'scoreDesc';
+type PostingRankStatus = 'all' | 'ranked' | 'unranked';
 
 type LlmCatalogProvider = {
   key: string;
@@ -36,6 +37,7 @@ export function PostingViewer() {
   const [postingSource, setPostingSource] = useState('');
   const [postingSort, setPostingSort] = useState<PostingSort>('scoreDesc');
   const [postingMinScore, setPostingMinScore] = useState('');
+  const [postingRankStatus, setPostingRankStatus] = useState<PostingRankStatus>('all');
   const [postingMessage, setPostingMessage] = useState('');
   const [deletingPostingId, setDeletingPostingId] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
@@ -55,6 +57,7 @@ export function PostingViewer() {
     source: postingSource.trim() || undefined,
     minScore: postingMinScore.trim() ? Number(postingMinScore) : undefined,
     sort: postingSort,
+    rankStatus: postingRankStatus === 'all' ? undefined : postingRankStatus,
     limit: 100,
   });
 
@@ -398,6 +401,9 @@ export function PostingViewer() {
     Boolean(scoreApiModelId) &&
     !catalogEmpty;
   const selectedCount = selectedPostingIds.size;
+  const allVisibleSelected = Boolean(
+    postings?.length && postings.every((posting) => selectedPostingIds.has(posting._id))
+  );
 
   const scoreModelSelectDisabled =
     scoreBusy || !providerModels.length || llmCatalog === undefined || catalogEmpty;
@@ -434,51 +440,73 @@ export function PostingViewer() {
         </button>
       </div>
       {postingMessage ? <p className='status-text'>{postingMessage}</p> : null}
-      <div className='filters'>
-        <input
-          value={postingQuery}
-          onChange={(event) => setPostingQuery(event.target.value)}
-          placeholder='Search title, company, location'
-        />
-        <select value={postingSource} onChange={(event) => setPostingSource(event.target.value)}>
-          <option value=''>All sources</option>
-          {postingSources.map((source) => (
-            <option value={source} key={source}>
-              {source}
-            </option>
-          ))}
-        </select>
-        <input
-          value={postingMinScore}
-          onChange={(event) => setPostingMinScore(event.target.value)}
-          placeholder='Min score'
-          type='number'
-          min={0}
-          max={100}
-        />
-        <select value={postingSort} onChange={(event) => setPostingSort(event.target.value as PostingSort)}>
-          <option value='scoreDesc'>Score (desc)</option>
-          <option value='discoveredAtDesc'>Discovered (newest)</option>
-          <option value='postedAtDesc'>Posted (newest)</option>
-        </select>
-      </div>
-      <div className='actions posting-bulk-actions'>
-        <button
-          type='button'
-          className='btn-success'
-          onClick={onBulkScoreSelected}
-          disabled={!selectedCount || scoreBusy || isClearing}
-        >
-          Score selected ({selectedCount})
-        </button>
-        <button
-          type='button'
-          className='btn-danger'
-          onClick={() => void onBulkDeleteSelected()}
-          disabled={!selectedCount || scoreBusy || isClearing || deletingPostingId !== null}
-        >
-          Delete selected ({selectedCount})
-        </button>
+      <div className='postings-sticky-toolbar'>
+        <div className='filters'>
+          <input
+            value={postingQuery}
+            onChange={(event) => setPostingQuery(event.target.value)}
+            placeholder='Search title, company, location'
+          />
+          <select value={postingSource} onChange={(event) => setPostingSource(event.target.value)}>
+            <option value=''>All sources</option>
+            {postingSources.map((source) => (
+              <option value={source} key={source}>
+                {source}
+              </option>
+            ))}
+          </select>
+          <select
+            value={postingRankStatus}
+            onChange={(event) => setPostingRankStatus(event.target.value as PostingRankStatus)}
+          >
+            <option value='all'>All statuses</option>
+            <option value='ranked'>Ranked only</option>
+            <option value='unranked'>Unranked only</option>
+          </select>
+          <input
+            value={postingMinScore}
+            onChange={(event) => setPostingMinScore(event.target.value)}
+            placeholder='Min score'
+            type='number'
+            min={0}
+            max={100}
+          />
+          <select value={postingSort} onChange={(event) => setPostingSort(event.target.value as PostingSort)}>
+            <option value='scoreDesc'>Score (desc)</option>
+            <option value='discoveredAtDesc'>Discovered (newest)</option>
+            <option value='postedAtDesc'>Posted (newest)</option>
+          </select>
+        </div>
+        <div className='posting-bulk-toolbar'>
+          <label className='posting-list-select-all'>
+            <input
+              type='checkbox'
+              aria-label='Select all visible postings'
+              checked={allVisibleSelected}
+              disabled={!postings?.length}
+              onChange={(event) => onToggleSelectAllVisible(event.target.checked)}
+            />
+            <span>Select all visible</span>
+          </label>
+          <div className='actions posting-bulk-actions'>
+            <button
+              type='button'
+              className='btn-success'
+              onClick={onBulkScoreSelected}
+              disabled={!selectedCount || scoreBusy || isClearing}
+            >
+              Score selected ({selectedCount})
+            </button>
+            <button
+              type='button'
+              className='btn-danger'
+              onClick={() => void onBulkDeleteSelected()}
+              disabled={!selectedCount || scoreBusy || isClearing || deletingPostingId !== null}
+            >
+              Delete selected ({selectedCount})
+            </button>
+          </div>
+        </div>
       </div>
       <PostingTable
         postings={postings}
@@ -487,7 +515,6 @@ export function PostingViewer() {
         onOpenScoreDialog={openScoreDialog}
         selectedPostingIds={selectedPostingIds}
         onTogglePostingSelection={onTogglePostingSelection}
-        onToggleSelectAllVisible={onToggleSelectAllVisible}
         emptyMessage={postings === undefined ? 'Loading…' : 'No postings match these filters.'}
       />
       {scoreTargets.length ? (

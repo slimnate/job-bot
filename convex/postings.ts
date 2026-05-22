@@ -47,6 +47,7 @@ export const list = query({
       )
     ),
     limit: v.optional(v.number()),
+    rankStatus: v.optional(v.union(v.literal('ranked'), v.literal('unranked'))),
   },
   handler: async (ctx, args) => {
     const sourceFiltered = args.source
@@ -77,6 +78,12 @@ export const list = query({
             .take(1)
         )[0] ?? null;
       if (args.minScore !== undefined && (latestRanking?.scoreOverall ?? -1) < args.minScore) {
+        continue;
+      }
+      if (args.rankStatus === 'ranked' && !latestRanking) {
+        continue;
+      }
+      if (args.rankStatus === 'unranked' && latestRanking) {
         continue;
       }
 
