@@ -49,22 +49,54 @@ a {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem 1.25rem;
+  gap: 0.4rem;
 }
 
-.app-navbar-links a {
-  color: #93c5fd;
+/** Navbar route links styled as pill buttons (not global form buttons). */
+.app-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.95rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9ca3af;
   text-decoration: none;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.2;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
-.app-navbar-links a:hover {
-  text-decoration: underline;
+.app-nav-btn:hover {
+  color: #e5e7eb;
+  background: #1a2332;
+  border-color: #334155;
+  text-decoration: none;
 }
 
-.app-navbar-links a.active {
+.app-nav-btn:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.app-nav-btn--active {
   color: #f8fafc;
   font-weight: 600;
+  background: #172554;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgb(37 99 235 / 25%);
+}
+
+.app-nav-btn--active:hover {
+  color: #f8fafc;
+  background: #1e3a8a;
+  border-color: #3b82f6;
 }
 
 .page {

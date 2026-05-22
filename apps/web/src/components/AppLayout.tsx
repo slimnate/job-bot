@@ -1,5 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom';
 
+/** Pill-style nav button classes for router links. */
+function navBtnClass({ isActive }: { isActive: boolean }) {
+  return isActive ? 'app-nav-btn app-nav-btn--active' : 'app-nav-btn';
+}
+
 export function AppLayout() {
   return (
     <>
@@ -9,16 +14,16 @@ export function AppLayout() {
             Job Bot
           </NavLink>
           <nav className='app-navbar-links' aria-label='Main'>
-            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/postings'>
+            <NavLink className={navBtnClass} to='/postings'>
               Postings
             </NavLink>
-            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/sources'>
+            <NavLink className={navBtnClass} to='/sources'>
               Sources
             </NavLink>
-            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/workers'>
+            <NavLink className={navBtnClass} to='/workers'>
               Workers
             </NavLink>
-            <NavLink className={({ isActive }) => (isActive ? 'active' : undefined)} to='/evaluators'>
+            <NavLink className={navBtnClass} to='/evaluators'>
               Evaluators
             </NavLink>
           </nav>
