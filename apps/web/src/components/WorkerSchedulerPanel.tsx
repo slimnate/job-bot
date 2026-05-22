@@ -8,10 +8,10 @@ type WorkerSchedulerStatusRow = Doc<'worker_scheduler_status'>;
 
 /**
  * Wall-clock age (ms) past which we consider the persisted status stale and
- * the worker likely dead. Paired with the worker's 5s heartbeat interval —
- * 30s gives ~6 missed heartbeats before alerting.
+ * the worker likely dead. Paired with the worker's 30s heartbeat interval —
+ * 90s gives ~3 missed heartbeats before alerting.
  */
-const STALE_THRESHOLD_MS = 30_000;
+const STALE_THRESHOLD_MS = 90_000;
 
 function formatDateTime(ts: number | null): string {
   if (ts === null) {

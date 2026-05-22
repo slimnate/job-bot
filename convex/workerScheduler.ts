@@ -45,7 +45,7 @@ export const getStatus = query({
 
 /**
  * Worker-side write path: upserts the singleton status row for the worker.
- * Called on scheduler start/stop, tick boundaries, and the 5s heartbeat
+ * Called on scheduler start/stop, tick boundaries, and the 30s heartbeat
  * interval — see `WorkerScheduler.flushStatus` in `apps/worker/src/scheduler.ts`.
  *
  * Edge cases:

@@ -45,10 +45,10 @@ export type WorkerSchedulerStatus = {
 
 /**
  * How often the scheduler writes a heartbeat to Convex while the timer is active.
- * Paired with the dashboard's staleness threshold (~30s); shorter heartbeats give
- * the UI a snappier "stale" indicator at the cost of more writes.
+ * Paired with the dashboard's staleness threshold (~90s). The scheduler cron itself
+ * runs every 15+ minutes, so sub-minute heartbeats are unnecessary write/bandwidth load.
  */
-const HEARTBEAT_INTERVAL_MS = 5_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export class WorkerScheduler {
   private readonly orchestrator: WorkerOrchestrator;

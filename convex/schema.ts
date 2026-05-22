@@ -169,7 +169,7 @@ export default defineSchema({
   /**
    * Persisted scheduler status for a worker process. Singleton row per `workerId`
    * (default `'default'`); the worker writes on start/stop/tick boundaries plus a
-   * heartbeat interval so the dashboard can render a reactive view and detect
+   * 30s heartbeat interval so the dashboard can render a reactive view and detect
    * stale/dead workers via `now - heartbeatAt`.
    *
    * Field shape mirrors `WorkerSchedulerStatus` in `apps/worker/src/scheduler.ts`
