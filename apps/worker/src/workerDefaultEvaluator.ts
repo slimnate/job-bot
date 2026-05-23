@@ -1,12 +1,12 @@
 import type { Id } from './convexBridge/doc.js';
+import { getOptionalSettingString } from './settings/settingsHelpers.js';
 
 /**
  * When a scrape run has no `evaluatorId`, the worker uses this Convex `job_evaluators` document id
- * for LLM ranking. Configured per worker process (e.g. `.env.local` on the machine running the worker),
- * not in the database.
+ * for LLM ranking after the source default. Env `WORKER_DEFAULT_EVALUATOR_ID` overrides Convex settings.
  */
-export function parseWorkerDefaultEvaluatorId(env: NodeJS.ProcessEnv): Id<'job_evaluators'> | undefined {
-  const raw = env.WORKER_DEFAULT_EVALUATOR_ID?.trim();
+export function parseWorkerDefaultEvaluatorId(): Id<'job_evaluators'> | undefined {
+  const raw = getOptionalSettingString('WORKER_DEFAULT_EVALUATOR_ID').trim();
   if (!raw) {
     return undefined;
   }

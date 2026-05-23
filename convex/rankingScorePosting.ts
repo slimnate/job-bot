@@ -1,6 +1,7 @@
 import { v } from 'convex/values';
 import {
   buildRankingPrompt,
+  parseAppSettingValue,
   rankingJsonSchema,
   RANKING_SYSTEM_MESSAGE,
   validateIndividualScores,
@@ -23,19 +24,31 @@ function readEnv(key: string): string | undefined {
   return typeof raw === 'string' ? raw : undefined;
 }
 
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
+function requireEffectiveKey(effective: Record<string, string>, key: string): string {
+  const raw = effective[key];
   if (raw === undefined || raw.trim() === '') {
-    return fallback;
+    throw new Error(`Missing effective setting '${key}'; run seedMissingSettings first.`);
   }
-  const n = Number.parseInt(raw.trim(), 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  return raw.trim();
 }
 
-function loadConvexRankingPromptOptions(): RankingPromptOptions {
-  return {
-    descriptionMaxChars: parsePositiveInt(readEnv('LLM_RANKING_DESCRIPTION_MAX_CHARS'), 4096),
+/** `getEffective` applies env-over-Convex precedence; requires seeded settings. */
+function resolveHttpRankingSettings(effective: Record<string, string>) {
+  const descriptionMaxChars = parseAppSettingValue(
+    'LLM_RANKING_DESCRIPTION_MAX_CHARS',
+    requireEffectiveKey(effective, 'LLM_RANKING_DESCRIPTION_MAX_CHARS')
+  ) as number;
+  const baseUrl = requireEffectiveKey(effective, 'LLM_API_BASE_URL').replace(/\/$/, '');
+  const temperature = parseAppSettingValue(
+    'LLM_RANKING_TEMPERATURE',
+    requireEffectiveKey(effective, 'LLM_RANKING_TEMPERATURE')
+  ) as number;
+  const defaultModel = requireEffectiveKey(effective, 'LLM_RANKING_MODEL');
+  const promptOptions: RankingPromptOptions = {
+    descriptionMaxChars,
     omitUrl: true,
   };
+  return { baseUrl, temperature, defaultModel, promptOptions };
 }
 
 function toRankingEvaluator(evaluator: Doc<'job_evaluators'>): RankingEvaluatorInput {
@@ -245,22 +258,21 @@ export const scoreOnePosting = action({
       };
     }
 
-    const baseUrl = (readEnv('LLM_API_BASE_URL') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-    const temperatureRaw = Number(readEnv('LLM_RANKING_TEMPERATURE') ?? '0.1');
-    const temperature = Number.isFinite(temperatureRaw) ? temperatureRaw : 0.1;
-    const resolvedModel = (args.apiModelId.trim() || readEnv('LLM_RANKING_MODEL') || 'gpt-4.1-mini').trim();
-    const promptOptions = loadConvexRankingPromptOptions();
+    await ctx.runMutation(api.appSettings.seedMissingSettings, {});
+    const effective = await ctx.runQuery(internal.appSettings.getEffective, {});
+    const httpSettings = resolveHttpRankingSettings(effective);
+    const resolvedModel = (args.apiModelId.trim() || httpSettings.defaultModel).trim();
     const evaluator = toRankingEvaluator(context.evaluator);
     const candidate = toRankingCandidates([context.posting])[0]!;
 
     const scored = await scoreOnePostingHttp({
       apiKey,
-      baseUrl,
+      baseUrl: httpSettings.baseUrl,
       resolvedModel,
-      temperature,
+      temperature: httpSettings.temperature,
       evaluator,
       candidate,
-      promptOptions,
+      promptOptions: httpSettings.promptOptions,
     });
 
     if (!scored.ok) {
@@ -319,12 +331,11 @@ export const scorePostingsBatch = action({
       };
     }
 
-    const baseUrl = (readEnv('LLM_API_BASE_URL') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
-    const temperatureRaw = Number(readEnv('LLM_RANKING_TEMPERATURE') ?? '0.1');
-    const temperature = Number.isFinite(temperatureRaw) ? temperatureRaw : 0.1;
-    const resolvedModel = (args.apiModelId.trim() || readEnv('LLM_RANKING_MODEL') || 'gpt-4.1-mini').trim();
+    await ctx.runMutation(api.appSettings.seedMissingSettings, {});
+    const effective = await ctx.runQuery(internal.appSettings.getEffective, {});
+    const httpSettings = resolveHttpRankingSettings(effective);
+    const resolvedModel = (args.apiModelId.trim() || httpSettings.defaultModel).trim();
 
-    const promptOptions = loadConvexRankingPromptOptions();
     const evaluator = toRankingEvaluator(context.evaluator);
     const candidates = toRankingCandidates(context.postings);
 
@@ -334,12 +345,12 @@ export const scorePostingsBatch = action({
       const candidate = candidates[index]!;
       const scored = await scoreOnePostingHttp({
         apiKey,
-        baseUrl,
+        baseUrl: httpSettings.baseUrl,
         resolvedModel,
-        temperature,
+        temperature: httpSettings.temperature,
         evaluator,
         candidate,
-        promptOptions,
+        promptOptions: httpSettings.promptOptions,
       });
 
       if (!scored.ok) {

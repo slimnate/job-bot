@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+import { loadCursorDefaultModel } from './rankingEnv.js';
+
 const MAX_ERROR_SNIPPET_CHARS = 6_000;
 
 /** Legacy catalog / env values that are not valid `cursor-agent --model` ids. */
@@ -75,13 +77,12 @@ export function flushCursorCliLineBuffer(buffer: CursorCliLineBuffer): string | 
  * Resolves the Cursor CLI model id (aliases invalid catalog seeds; default `auto`).
  */
 export function resolveCursorApiModelId(modelOverride?: string): string {
-  const fromEnv =
-    process.env.LLM_RANKING_CURSOR_MODEL?.trim() ||
-    process.env.LLM_RANKING_MODEL?.trim() ||
-    'auto';
-  const raw = (modelOverride?.trim() || fromEnv).trim();
+  const fromSettings = loadCursorDefaultModel().trim();
+  const raw = (modelOverride?.trim() || fromSettings).trim();
   if (!raw) {
-    return 'auto';
+    throw new Error(
+      'LLM_RANKING_CURSOR_MODEL is empty; set it in Settings or LLM_RANKING_CURSOR_MODEL env.'
+    );
   }
   return CURSOR_MODEL_ALIASES[raw] ?? raw;
 }

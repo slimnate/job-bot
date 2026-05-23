@@ -2,6 +2,8 @@ import { ConvexHttpClient } from 'convex/browser';
 
 import { api } from './convexBridge/api.js';
 import { isSchedulerDebug } from './debugFlags.js';
+import { getWorkerSettingsCache } from './settings/settingsCache.js';
+import { getSettingBool, getSettingNumber } from './settings/settingsHelpers.js';
 import { workerLog } from './log.js';
 import { WorkerOrchestrator } from './orchestrator.js';
 
@@ -101,6 +103,37 @@ export class WorkerScheduler {
       lastTickFailedAt: this.lastTickFailedAt,
       lastTickError: this.lastTickError,
     };
+  }
+
+  /**
+   * Applies scheduler fields from the settings cache (env overrides Convex).
+   * Restarts the interval timer when `WORKER_CRON_INTERVAL_MINUTES` changes.
+   */
+  private applyDynamicConfigFromSettings(): void {
+    const intervalMinutes = getSettingNumber('WORKER_CRON_INTERVAL_MINUTES');
+    const nextIntervalMs = intervalMinutes * 60_000;
+    const runOnStart = getSettingBool('WORKER_RUN_ON_START');
+
+    if (this.config.runOnStart !== runOnStart) {
+      this.config.runOnStart = runOnStart;
+    }
+
+    this.orchestrator.setEnableLlmRanking(getSettingBool('WORKER_ENABLE_LLM_RANKING'));
+
+    if (this.config.intervalMs === nextIntervalMs) {
+      return;
+    }
+
+    this.config.intervalMs = nextIntervalMs;
+    if (!this.timer) {
+      return;
+    }
+
+    clearInterval(this.timer);
+    this.timer = setInterval(() => {
+      this.lastIntervalRingAt = Date.now();
+      void this.enqueueTick('interval');
+    }, this.config.intervalMs);
   }
 
   private computeNextIntervalTickAt(): number | null {
@@ -217,6 +250,14 @@ export class WorkerScheduler {
     }
     this.statusFlushInFlight = true;
     try {
+      try {
+        await getWorkerSettingsCache().refresh();
+        this.applyDynamicConfigFromSettings();
+      } catch (refreshError: unknown) {
+        workerLog.warn('settings.refresh_failed', {
+          err: refreshError instanceof Error ? refreshError.message : 'Unknown error',
+        });
+      }
       const snapshot = this.getStatus();
       await this.config.convex.mutation(api.workerScheduler.upsertStatus, {
         workerId: this.config.workerId,
@@ -233,20 +274,17 @@ export class WorkerScheduler {
   }
 }
 
-export function loadSchedulerConfigFromEnv(
-  env: Record<string, string | undefined>,
-  deps: { convex: ConvexHttpClient }
-): WorkerSchedulerConfig {
-  const intervalMinutesRaw = env.WORKER_CRON_INTERVAL_MINUTES ?? '15';
-  const parsed = Number(intervalMinutesRaw);
-  const intervalMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : 15;
-
-  const workerIdRaw = env.WORKER_ID?.trim();
+export function loadSchedulerConfigFromSettings(deps: {
+  convex: ConvexHttpClient;
+  workerId?: string;
+}): WorkerSchedulerConfig {
+  const intervalMinutes = getSettingNumber('WORKER_CRON_INTERVAL_MINUTES');
+  const workerIdRaw = deps.workerId ?? process.env.WORKER_ID?.trim();
   const workerId = workerIdRaw && workerIdRaw.length > 0 ? workerIdRaw : 'default';
 
   return {
     intervalMs: intervalMinutes * 60 * 1000,
-    runOnStart: env.WORKER_RUN_ON_START !== 'false',
+    runOnStart: getSettingBool('WORKER_RUN_ON_START'),
     convex: deps.convex,
     workerId,
   };

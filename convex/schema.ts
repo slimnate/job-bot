@@ -1,7 +1,7 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
-export const schemaVersion = 'job_sources_default_evaluator';
+export const schemaVersion = 'worker_settings_env';
 
 export default defineSchema({
   job_evaluators: defineTable({
@@ -197,6 +197,28 @@ export default defineSchema({
     lastTickError: v.union(v.string(), v.null()),
     /** Wall-clock time of the last heartbeat write; used client-side to detect a dead worker. */
     heartbeatAt: v.number(),
+    updatedAt: v.number(),
+  }).index('by_worker_id', ['workerId']),
+
+  /**
+   * Global app configuration (Settings page). Values are strings; parsers live in @job-bot/shared.
+   * Env vars override stored values at runtime when non-empty.
+   */
+  app_settings: defineTable({
+    scope: v.literal('global'),
+    values: v.record(v.string(), v.string()),
+    updatedAt: v.number(),
+  }).index('by_scope', ['scope']),
+
+  /**
+   * Allowlisted env vars present on a worker host (from `.env.local`), reported on heartbeat.
+   * Used by the Settings UI for Env override badges; worker values win over Convex runtime env.
+   */
+  worker_settings_env: defineTable({
+    workerId: v.string(),
+    envOverrides: v.record(v.string(), v.string()),
+    /** Wall-clock time the worker last reported (for staleness hints). */
+    reportedAt: v.number(),
     updatedAt: v.number(),
   }).index('by_worker_id', ['workerId']),
 });

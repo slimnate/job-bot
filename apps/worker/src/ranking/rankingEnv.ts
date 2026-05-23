@@ -1,65 +1,45 @@
 import type { RankingPromptOptions } from '@job-bot/shared';
 
+import { getSettingBool, getSettingNumber, getSettingString } from '../settings/settingsHelpers.js';
+
 export type RankingProviderKind = 'cursor' | 'http';
-
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw.trim() === '') {
-    return fallback;
-  }
-  const n = Number.parseInt(raw.trim(), 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-function parseEnvBool(raw: string | undefined, defaultValue: boolean): boolean {
-  if (raw === undefined || raw.trim() === '') {
-    return defaultValue;
-  }
-  const v = raw.trim().toLowerCase();
-  if (v === '1' || v === 'true' || v === 'yes') {
-    return true;
-  }
-  if (v === '0' || v === 'false' || v === 'no') {
-    return false;
-  }
-  return defaultValue;
-}
 
 /**
  * HTTP inline prompt options (description truncation for chat completions).
  */
 export function loadRankingPromptOptions(): RankingPromptOptions {
   return {
-    descriptionMaxChars: parsePositiveInt(process.env.LLM_RANKING_DESCRIPTION_MAX_CHARS, 4096),
+    descriptionMaxChars: getSettingNumber('LLM_RANKING_DESCRIPTION_MAX_CHARS'),
     omitUrl: true,
   };
 }
 
 export function loadRankingBaseTimeoutMs(): number {
-  return parsePositiveInt(process.env.LLM_RANKING_TIMEOUT_MS, 60_000);
+  return getSettingNumber('LLM_RANKING_TIMEOUT_MS');
 }
 
 export function loadRankingTimeoutPerCandidateMs(): number {
-  return parsePositiveInt(process.env.LLM_RANKING_TIMEOUT_PER_CANDIDATE_MS, 5_000);
+  return getSettingNumber('LLM_RANKING_TIMEOUT_PER_CANDIDATE_MS');
 }
 
 export function isCursorBatchFilesEnabled(): boolean {
-  return parseEnvBool(process.env.LLM_RANKING_CURSOR_USE_BATCH_FILES, true);
+  return getSettingBool('LLM_RANKING_CURSOR_USE_BATCH_FILES');
 }
 
 export function isCursorInlinePromptForced(): boolean {
-  return parseEnvBool(process.env.LLM_RANKING_CURSOR_INLINE_PROMPT, false);
+  return getSettingBool('LLM_RANKING_CURSOR_INLINE_PROMPT');
 }
 
 export function shouldKeepCursorBatchFiles(): boolean {
-  return parseEnvBool(process.env.LLM_RANKING_CURSOR_KEEP_BATCH_FILES, false);
+  return getSettingBool('LLM_RANKING_CURSOR_KEEP_BATCH_FILES');
 }
 
 export function loadCursorFileExtraTimeoutMs(): number {
-  return parsePositiveInt(process.env.LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS, 90_000);
+  return getSettingNumber('LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS');
 }
 
 export function isCursorMinimalContextEnabled(): boolean {
-  return parseEnvBool(process.env.LLM_RANKING_CURSOR_MINIMAL_CONTEXT, true);
+  return getSettingBool('LLM_RANKING_CURSOR_MINIMAL_CONTEXT');
 }
 
 /**
@@ -67,13 +47,12 @@ export function isCursorMinimalContextEnabled(): boolean {
  * `llm.rank.cursor_cli.output` at debug level during ranking.
  */
 export function isCursorCliOutputLogEnabled(): boolean {
-  return parseEnvBool(process.env.LLM_RANKING_CURSOR_LOG_OUTPUT, true);
+  return getSettingBool('LLM_RANKING_CURSOR_LOG_OUTPUT');
 }
 
 export const CURSOR_PROMPT_FILE_THRESHOLD_CHARS = 200_000;
 
-/** Default `cursor-agent --model` when none is selected (must be a real CLI model id). */
+/** Default `cursor-agent --model` from settings (must be a real CLI model id). */
 export function loadCursorDefaultModel(): string {
-  const raw = process.env.LLM_RANKING_CURSOR_MODEL?.trim();
-  return raw && raw.length > 0 ? raw : 'auto';
+  return getSettingString('LLM_RANKING_CURSOR_MODEL');
 }

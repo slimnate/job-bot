@@ -7,6 +7,7 @@ import type { Id } from './convexBridge/doc.js';
 import { isScrapeDebug } from './debugFlags.js';
 import { withLinkedInBrowserExclusive } from './linkedinBrowserLock.js';
 import { workerLog } from './log.js';
+import { getWorkerSettingsCache } from './settings/settingsCache.js';
 import { collectLinkedInPostings } from './sources/linkedinJobs.js';
 import type { ScrapedPostingInput, ScrapeResult, ScrapeStats } from './scrapeTypes.js';
 
@@ -41,7 +42,7 @@ export async function collectPostingsForSource(params: {
           runId: params.runId,
           sourceCriteria: params.sourceCriteria,
           driver,
-          env: process.env,
+          env: getWorkerSettingsCache().getEnvRecord(),
           streamPosting: params.streamPosting,
         });
       } finally {

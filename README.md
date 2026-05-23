@@ -4,7 +4,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 
 ## What is implemented so far
 
-- Web dashboard with four sections:
+- Web dashboard with main sections:
   - Evaluators (`apps/web/src/components/EvaluatorsEditor.tsx`): multiple named evaluator profiles, optional **Resume (Markdown)** and **Evaluation prompt** for the LLM, **Notes** (private — not sent to the ranker), and an **Active** flag per profile (only **Active** profiles can be chosen on queued runs; worker default ranking profile is `WORKER_DEFAULT_EVALUATOR_ID` per machine, not this flag)
 - Postings viewer (`apps/web/src/components/PostingViewer.tsx`) with:
   - humanized discovered timestamps (same-day time, older relative age)
@@ -18,6 +18,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - status color coding (`queued` blue, `running` yellow, `succeeded` green, `failed`/`cancelled` red)
   - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
   - log detail modal with table-first view, **per-level filters** (debug / info / warn / error), and raw JSON
+- Settings (`/settings`, sidebar layout in `apps/web/src/pages/SettingsLayout.tsx`): **Overview** plus section routes (`/settings/scheduler`, `/settings/linkedin`, `/settings/ranking`, `/settings/http-openai`, `/settings/cursor-cli`, `/settings/web`, `/settings/advanced`). Worker, LinkedIn, ranking, HTTP/OpenAI (non-secret), Cursor CLI, and web↔worker options stored in Convex `app_settings`; each field has always-visible hint text (catalog in `packages/shared/src/settings/appSettingDefinitions.ts`). Non-empty env vars override saved values; the worker refreshes settings about every 30 seconds. Draft edits persist across section navigation until you save.
 - Sources (`/sources`, `apps/web/src/components/SourcesManager.tsx`) with:
   - source **Enabled** on/off toggle (disabled sources are omitted from the queue source picker)
   - read-only accepted criteria fields (code-defined contracts)
@@ -30,6 +31,8 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - Run lifecycle (`convex/runs.ts`)
   - Ranking recompute/upsert (`convex/ranking.ts`)
   - Ranking LLM catalog for the Score dialog (`convex/rankingLlmCatalog.ts`): providers + models; seed Cursor rows with `npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog` or full catalog with `npm run populate:ranking-catalog`
+  - App settings (`convex/appSettings.ts`): `get`, `getForUi`, `upsert`, `seedMissingSettings` (per-key factory seed), internal `getEffective` for env-over-Convex resolution
+  - Worker-reported env (`convex/workerSettingsEnv.ts`): worker pushes allowlisted `.env.local` overrides on heartbeat so Settings **Env override** badges match the worker host (not only Convex cloud env)
 - Worker runtime with:
   - Cron-like scheduler (`apps/worker/src/scheduler.ts`)
   - In-memory bounded queue abstraction (`apps/worker/src/queue.ts`)
@@ -77,6 +80,8 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `job_rankings`: per-posting scoring outputs (`scoreOverall`, reasoning, criteria match, red flags) linked by `evaluatorId` — no `rank` field
 - `ranking_llm_providers`: stable `key`, `displayName`, `surface` (`convex_http` = OpenAI-compatible call from Convex; `worker_cursor` = Cursor CLI on the worker), `sortOrder`
 - `ranking_llm_models`: `providerKey`, `apiModelId`, `displayName`, `sortOrder` (options shown in the Score dialog)
+- `app_settings`: global scope singleton (`values` map of string settings for the Settings page)
+- `worker_settings_env`: per-`workerId` snapshot of allowlisted env vars from the worker process (`envOverrides`, `reportedAt`)
 
 Schema lives in `convex/schema.ts`.
 
@@ -123,6 +128,12 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.rankingLlmCatalog.replaceCatalog` (mutation: full replace of catalog; used by `populate:ranking-catalog`)
 - `api.rankingLlmCatalog.seedCursorCliModelsCatalog` (mutation: delete all `cursor` model rows, insert 111 Cursor CLI models from `@job-bot/shared`; OpenAI rows unchanged)
 - `api.rankingScorePosting.scoreOnePosting` (Convex **action**: OpenAI / compatible HTTP path only; writes `job_rankings`; Cursor uses worker `POST /rank-posting`)
+- `api.appSettings.get`
+- `api.appSettings.getForUi`
+- `api.appSettings.upsert`
+- `api.appSettings.seedMissingSettings` (idempotent: inserts/patches only missing catalog keys from system defaults)
+- `api.workerSettingsEnv.getByWorkerId`
+- `api.workerSettingsEnv.upsertFromWorker`
 
 ## Local setup
 
@@ -134,15 +145,35 @@ npm run install:all
 
 ### 2) Environment
 
-The project currently relies on Convex URL values. In local development, set:
+#### Infrastructure (env only — not on Settings page)
 
 > If `npx convex dev` prints **Found multiple CONVEX_URL environment variables in .env.local**, you have the same key loaded twice: often `CONVEX_URL` is set in your shell *and* in `.env.local`. Unset the shell copy (`unset CONVEX_URL`) or remove the duplicate line in `.env.local`.
 
-- `VITE_CONVEX_URL` for the web app
-- `CONVEX_URL` for worker runtime
-- `VITE_WORKER_TRIGGER_URL` (optional): URL for **Trigger now** in the scrape queue (default in the app: `http://127.0.0.1:3999/trigger`; must match `WORKER_HTTP_TRIGGER_PORT` on the worker). The Postings **Score** dialog derives the worker base URL by stripping `/trigger` and calls `POST …/rank-posting` when you choose **Cursor CLI**. The Workers page **Scheduler** panel reads from Convex (`worker_scheduler_status`) reactively, so it does **not** depend on this URL — the worker still exposes `GET /scheduler` for ops debugging via `curl`.
+- `VITE_CONVEX_URL` — web app bootstrap
+- `CONVEX_URL` — worker and scripts
+- `OPENAI_API_KEY` — Convex dashboard env and/or `.env.local` (required for HTTP scoring)
+- `LINKEDIN_USER` / `LINKEDIN_PASS` — optional LinkedIn auto-login (worker host only; never stored in Convex)
+- `CHROME_PATH` — machine-specific Chrome/Chromium binary
+- `WORKER_HTTP_TRIGGER_PORT` — local worker HTTP bind (e.g. `3999` in `dev:all`)
+- `WORKER_ID` — per-process worker identity for `worker_scheduler_status`
+- `WORKER_MANAGE_CHROME` — attach to existing Chrome (`0`) vs spawn (`1`, default)
+- `SCHEDULER_DEBUG`, `ORCHESTRATOR_DEBUG`, `SCRAPE_DEBUG`, `RANK_DEBUG` — verbose worker debug logs
+- `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS` — `npm run trigger:linkedin` poll timeout
+- `CURSOR_CLI_ARGS` — advanced Cursor CLI argv template (`{prompt}` for huge prompts)
 
-Worker-specific optional env vars:
+#### Configurable via Settings (`/settings`) with optional env override
+
+Most tuning vars are editable on the **Settings** page (stored in `app_settings`). When a variable is set to a **non-empty** value in `.env.local` or the shell, it **overrides** the saved UI value on the **worker**. Runtime code does **not** apply hidden fallbacks — only env, Convex stored values, or (for seeding/UI labels) the developer file below. The Settings UI shows **Env override** with a tooltip indicating **worker** (`.env.local`), **Convex** (deployment env), or **browser** (Vite) when applicable. The worker reports allowlisted env keys to `worker_settings_env` on its ~30s heartbeat. Shell exports still beat `.env.local` for the same key (Node `--env-file` behavior).
+
+**Factory defaults (developers):** edit `packages/shared/src/settings/systemSettingDefaults.ts` only. On cold start or when you add a new catalog key, `seedMissingSettings` patches **each missing key individually** into `app_settings` (never overwrites existing keys, including optional fields saved as empty string). The worker calls this on every settings refresh; opening **Settings** in the web app also seeds once.
+
+Examples you can set in the UI (see in-app hints for full detail): `WORKER_CRON_INTERVAL_MINUTES`, `WORKER_QUEUE_CONCURRENCY`, `WORKER_USE_CHROME`, `WORKER_LINKEDIN_PAGES`, `LLM_RANKING_PROVIDER`, `LLM_RANKING_MODEL`, `VITE_WORKER_TRIGGER_URL` (also overridable via `import.meta.env` in the browser), and others listed in `packages/shared/src/settings/appSettingDefinitions.ts`.
+
+`VITE_WORKER_TRIGGER_URL`: URL for **Trigger now** and Cursor **Score** (`POST …/rank-posting`). Must match `WORKER_HTTP_TRIGGER_PORT`. Set in Settings (seeded from system defaults on first run), `.env.local`, or Vite (`VITE_*` wins in the browser when set at build/dev time). There is no hardcoded URL fallback in the web app.
+
+#### Legacy env reference (same keys as Settings)
+
+Worker-specific optional env vars (all overridable from Settings unless listed as infrastructure above):
 
 - `WORKER_USE_CHROME` (default: off): set to `1` to use Chrome with remote debugging for CDP scrapers. **Required for LinkedIn.** Root `npm run dev:all` sets this on the worker leg. The worker still does **not** launch Chrome at process startup; the first LinkedIn scrape spawns or attaches Chrome. If Chrome exits while the worker keeps running, the next LinkedIn scrape **reconnects CDP** or **respawns** managed Chrome so you are less likely to see `WebSocket is not open` from a stale session.
 - LinkedIn scrapes **do not** fail on a pre-flight cookie check: the worker navigates to LinkedIn first, then waits for the jobs shell. If Chrome is not signed in, complete login in the window or set `LINKEDIN_USER` / `LINKEDIN_PASS` for a one-shot form submit (see below); the run only fails if that wait times out. After a successful env-based login the worker always opens `https://www.linkedin.com/jobs/`; if you are already signed in but LinkedIn left you on feed/home, the worker navigates to that same jobs hub once, and may reload it once if the jobs UI is slow to appear.

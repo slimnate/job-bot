@@ -64,7 +64,7 @@ function formatWorkerError(error: unknown): string {
 export class WorkerOrchestrator {
   private readonly convex: ConvexHttpClient;
   private readonly queue: InMemoryTaskQueue<QueuePayload>;
-  private readonly enableLlmRanking: boolean;
+  private enableLlmRanking: boolean;
   /** Run IDs already handed to the in-memory queue (or running). Prevents duplicate work from scheduler + DB. */
   private readonly inflightRunIds = new Set<string>();
 
@@ -72,6 +72,11 @@ export class WorkerOrchestrator {
     this.convex = createWorkerConvexClient(params.convexUrl);
     this.queue = new InMemoryTaskQueue<QueuePayload>(params.concurrency);
     this.enableLlmRanking = params.enableLlmRanking ?? true;
+  }
+
+  /** Updated when app settings refresh (~30s); env overrides Convex. */
+  setEnableLlmRanking(enabled: boolean): void {
+    this.enableLlmRanking = enabled;
   }
 
   private runConvex<T>(label: string, operation: () => Promise<T>): Promise<T> {
@@ -342,7 +347,7 @@ export class WorkerOrchestrator {
           const rankingEvaluatorId =
             runDoc.evaluatorId ??
             sourceDefaultEvaluatorId ??
-            parseWorkerDefaultEvaluatorId(process.env);
+            parseWorkerDefaultEvaluatorId();
           if (!rankingEvaluatorId) {
             workerLog.warn('run.phase', {
               phase: 'ranking_no_evaluator',

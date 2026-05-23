@@ -19,6 +19,7 @@ import {
 } from '@job-bot/shared';
 
 import { isRankDebug } from '../debugFlags.js';
+import { getSettingNumber, getSettingString } from '../settings/settingsHelpers.js';
 import { workerLog } from '../log.js';
 import { withRetry } from '../retry.js';
 import {
@@ -101,44 +102,32 @@ function parseArgs(input: string): string[] {
 }
 
 function resolveProvider(): RankingProviderKind {
-  const raw = process.env.LLM_RANKING_PROVIDER?.trim().toLowerCase();
+  const raw = getSettingString('LLM_RANKING_PROVIDER').trim().toLowerCase();
   if (raw === 'cursor' || raw === 'http') {
     return raw;
   }
-  if (raw) {
-    throw new Error(
-      `Invalid LLM_RANKING_PROVIDER '${process.env.LLM_RANKING_PROVIDER}'. Use 'cursor' or 'http'.`
-    );
-  }
-  if (process.env.OPENAI_API_KEY) {
-    return 'http';
-  }
-  return 'cursor';
+  throw new Error(`Invalid LLM_RANKING_PROVIDER '${raw}'. Use 'cursor' or 'http'.`);
 }
 
 function loadLlmConfig(modelOverride?: string): LlmClientConfig {
-  const temperatureRaw = Number(process.env.LLM_RANKING_TEMPERATURE ?? '0.1');
-  const temperature = Number.isFinite(temperatureRaw) ? temperatureRaw : 0.1;
+  const temperature = getSettingNumber('LLM_RANKING_TEMPERATURE');
   return {
     apiKey: requiredEnv('OPENAI_API_KEY'),
-    baseUrl: process.env.LLM_API_BASE_URL ?? 'https://api.openai.com/v1',
-    model: modelOverride ?? process.env.LLM_RANKING_MODEL ?? 'gpt-4.1-mini',
+    baseUrl: getSettingString('LLM_API_BASE_URL'),
+    model: modelOverride ?? getSettingString('LLM_RANKING_MODEL'),
     temperature,
   };
 }
 
-function defaultRankingCliWorkspace(): string {
-  const workerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-  return join(workerRoot, 'ranking-cli-workspace');
-}
-
 function loadCursorCliConfig(modelOverride?: string): CursorCliConfig {
   return {
-    command: process.env.CURSOR_CLI_COMMAND?.trim() || 'cursor-agent',
-    args: parseArgs(process.env.CURSOR_CLI_ARGS ?? '--print --mode=ask --trust --output-format text'),
+    command: getSettingString('CURSOR_CLI_COMMAND').trim(),
+    args: parseArgs(
+      process.env.CURSOR_CLI_ARGS ?? '--print --mode=ask --trust --output-format text'
+    ),
     timeoutMs: loadRankingBaseTimeoutMs(),
     model: resolveCursorApiModelId(modelOverride),
-    workspaceDir: process.env.CURSOR_CLI_WORKSPACE?.trim() || defaultRankingCliWorkspace(),
+    workspaceDir: getSettingString('CURSOR_CLI_WORKSPACE').trim(),
   };
 }
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
+import { useWorkerTriggerUrl } from '../hooks/useWorkerTriggerUrl.js';
 import { PlusIcon } from './PlusIcon.js';
 import { SourceCriteriaFields } from './SourceCriteriaFields.js';
 
@@ -47,9 +48,7 @@ export function ScrapeQueuePanel() {
   const [isAdding, setIsAdding] = useState(false);
   const [triggeringRunId, setTriggeringRunId] = useState<Id<'scrape_runs'> | null>(null);
 
-  const workerTriggerUrl =
-    (import.meta.env.VITE_WORKER_TRIGGER_URL as string | undefined) ??
-    'http://127.0.0.1:3999/trigger';
+  const workerTriggerUrl = useWorkerTriggerUrl();
 
   const [editingId, setEditingId] = useState<Id<'scrape_runs'> | null>(null);
   const [editSource, setEditSource] = useState('');
@@ -170,6 +169,9 @@ export function ScrapeQueuePanel() {
   };
 
   const wakeWorkerScheduler = async (): Promise<boolean> => {
+    if (!workerTriggerUrl) {
+      return false;
+    }
     try {
       const res = await fetch(workerTriggerUrl, { method: 'POST' });
       return res.ok;

@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { JOB_BOT_POSTING_PUSH_BINDING, type ChromeDriver } from '@job-bot/agent-core';
+import { parseAppSettingValue } from '@job-bot/shared';
 
 import type { Id } from '../convexBridge/doc.js';
 import { isScrapeDebug } from '../debugFlags.js';
@@ -33,38 +34,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined) {
-    return defaultValue;
-  }
-  const lower = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(lower)) {
-    return true;
-  }
-  if (['0', 'false', 'no', 'off'].includes(lower)) {
-    return false;
-  }
-  return defaultValue;
-}
-
-const DEFAULT_LINKEDIN_PAGES = 3;
 const MAX_LINKEDIN_PAGES_CAP = 10;
 
+function requireResolved(env: Record<string, string | undefined>, key: string): string {
+  const raw = env[key];
+  if (raw === undefined) {
+    throw new Error(`Missing '${key}' in worker settings (seed app_settings or set env)`);
+  }
+  return raw;
+}
+
 /**
- * Parses `WORKER_LINKEDIN_PAGES`: positive integer, default 3, capped for safety.
+ * Parses `WORKER_LINKEDIN_PAGES` from a settings-merged env record; capped for safety.
  */
-function parseLinkedInPagesFromEnv(env: NodeJS.ProcessEnv): number {
-  const raw = env.WORKER_LINKEDIN_PAGES;
-  if (raw === undefined || raw.trim() === '') {
-    return DEFAULT_LINKEDIN_PAGES;
-  }
-  const n = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(n) || n < 1) {
-    workerLog.warn('linkedin.pages', {
-      message: `Invalid WORKER_LINKEDIN_PAGES=${JSON.stringify(raw)}; using ${DEFAULT_LINKEDIN_PAGES}`,
-    });
-    return DEFAULT_LINKEDIN_PAGES;
-  }
+function parseLinkedInPagesFromEnv(env: Record<string, string | undefined>): number {
+  const raw = requireResolved(env, 'WORKER_LINKEDIN_PAGES');
+  const n = parseAppSettingValue('WORKER_LINKEDIN_PAGES', raw) as number;
   if (n > MAX_LINKEDIN_PAGES_CAP) {
     workerLog.warn('linkedin.pages', {
       message: `WORKER_LINKEDIN_PAGES=${n} exceeds cap ${MAX_LINKEDIN_PAGES_CAP}; using cap`,
@@ -75,22 +60,16 @@ function parseLinkedInPagesFromEnv(env: NodeJS.ProcessEnv): number {
 }
 
 /**
- * Parses `WORKER_LINKEDIN_MAX_POSTINGS`: optional positive integer cap for collected postings.
- * Returns `undefined` when unset/blank so scraping remains uncapped.
+ * Parses `WORKER_LINKEDIN_MAX_POSTINGS`: optional cap; undefined when blank.
  */
-function parseLinkedInMaxPostingsFromEnv(env: NodeJS.ProcessEnv): number | undefined {
+function parseLinkedInMaxPostingsFromEnv(
+  env: Record<string, string | undefined>
+): number | undefined {
   const raw = env.WORKER_LINKEDIN_MAX_POSTINGS;
   if (raw === undefined || raw.trim() === '') {
     return undefined;
   }
-  const n = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(n) || n < 1) {
-    workerLog.warn('linkedin.max_postings', {
-      message: `Invalid WORKER_LINKEDIN_MAX_POSTINGS=${JSON.stringify(raw)}; ignoring cap`,
-    });
-    return undefined;
-  }
-  return n;
+  return parseAppSettingValue('WORKER_LINKEDIN_MAX_POSTINGS', raw) as number;
 }
 
 /**
@@ -594,7 +573,10 @@ export async function collectLinkedInPostings(params: {
   const steppingEnabled = debugMode === 'coarse' || debugMode === 'fine';
   const linkedInMaxPages = parseLinkedInPagesFromEnv(params.env);
   const linkedInMaxPostings = parseLinkedInMaxPostingsFromEnv(params.env);
-  const headless = parseEnvBool(params.env.WORKER_CHROME_HEADLESS, true);
+  const headless = parseAppSettingValue(
+    'WORKER_CHROME_HEADLESS',
+    requireResolved(params.env, 'WORKER_CHROME_HEADLESS')
+  ) as boolean;
   if (headless) {
     workerLog.warn('linkedin.chrome', {
       message:

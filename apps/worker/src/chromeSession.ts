@@ -8,6 +8,7 @@ import {
   launchChromeWithRemoteDebugging,
   type ChromeDriver,
 } from '@job-bot/agent-core';
+import { parseAppSettingValue } from '@job-bot/shared';
 
 import { isScrapeDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
@@ -28,9 +29,18 @@ export type WorkerChromeSessionOptions = {
   executablePath?: string;
 };
 
-function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined) {
-    return defaultValue;
+function requireResolved(env: Record<string, string | undefined>, key: string): string {
+  const raw = env[key];
+  if (raw === undefined) {
+    throw new Error(`Missing '${key}' in worker settings (seed app_settings or set env)`);
+  }
+  return raw;
+}
+
+/** Env-only key (not in app settings catalog); conventional default when unset. */
+function parseEnvOnlyBool(value: string | undefined, whenUnset: boolean): boolean {
+  if (value === undefined || value.trim() === '') {
+    return whenUnset;
   }
   const lower = value.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(lower)) {
@@ -39,21 +49,31 @@ function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean
   if (['0', 'false', 'no', 'off'].includes(lower)) {
     return false;
   }
-  return defaultValue;
+  throw new Error(`Invalid boolean env value: ${JSON.stringify(value)}`);
 }
 
 export function loadWorkerChromeSessionOptionsFromEnv(
-  env: NodeJS.ProcessEnv
+  env: Record<string, string | undefined>
 ): WorkerChromeSessionOptions {
-  const portRaw = env.WORKER_CHROME_PORT ?? '9222';
-  const portParsed = Number(portRaw);
-  const port = Number.isFinite(portParsed) && portParsed > 0 ? portParsed : 9222;
+  const port = parseAppSettingValue(
+    'WORKER_CHROME_PORT',
+    requireResolved(env, 'WORKER_CHROME_PORT')
+  ) as number;
 
   return {
-    enabled: parseEnvBool(env.WORKER_USE_CHROME, false),
-    headless: parseEnvBool(env.WORKER_CHROME_HEADLESS, true),
-    manageChrome: parseEnvBool(env.WORKER_MANAGE_CHROME, true),
-    autoCleanupAfterLinkedInScrape: parseEnvBool(env.WORKER_AUTO_CLEANUP_CHROME, true),
+    enabled: parseAppSettingValue(
+      'WORKER_USE_CHROME',
+      requireResolved(env, 'WORKER_USE_CHROME')
+    ) as boolean,
+    headless: parseAppSettingValue(
+      'WORKER_CHROME_HEADLESS',
+      requireResolved(env, 'WORKER_CHROME_HEADLESS')
+    ) as boolean,
+    manageChrome: parseEnvOnlyBool(env.WORKER_MANAGE_CHROME, true),
+    autoCleanupAfterLinkedInScrape: parseAppSettingValue(
+      'WORKER_AUTO_CLEANUP_CHROME',
+      requireResolved(env, 'WORKER_AUTO_CLEANUP_CHROME')
+    ) as boolean,
     port,
     executablePath: env.CHROME_PATH,
   };

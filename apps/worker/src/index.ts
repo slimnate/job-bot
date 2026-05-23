@@ -5,9 +5,14 @@ import { createWorkerConvexClient } from './convexHttp.js';
 import { initWorkerChromeFromEnv } from './chromeSession.js';
 import { isSchedulerDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
-import { parseLinkedInDebugSteps } from './sources/linkedinDebugSteps.js';
+import { parseLinkedInDebugStepsFromResolvedEnv } from './sources/linkedinDebugSteps.js';
 import { WorkerOrchestrator } from './orchestrator.js';
-import { loadSchedulerConfigFromEnv, WorkerScheduler } from './scheduler.js';
+import {
+  initWorkerSettingsCache,
+  resolveWorkerIdFromEnv,
+} from './settings/settingsCache.js';
+import { getSettingBool, getSettingNumber } from './settings/settingsHelpers.js';
+import { loadSchedulerConfigFromSettings, WorkerScheduler } from './scheduler.js';
 import { startWorkerTriggerServer, stopWorkerTriggerServer } from './workerTriggerServer.js';
 
 function requireEnv(name: string): string {
@@ -36,19 +41,17 @@ function parseEnvBool(value: string | undefined, defaultValue: boolean): boolean
   return defaultValue;
 }
 
-export function createWorkerRuntime(): WorkerScheduler {
+export function createWorkerRuntime(convex: ReturnType<typeof createWorkerConvexClient>): WorkerScheduler {
   const convexUrl = requireEnv('CONVEX_URL');
-  const concurrencyRaw = Number(process.env.WORKER_QUEUE_CONCURRENCY ?? '2');
-  const concurrency = Number.isFinite(concurrencyRaw) && concurrencyRaw > 0 ? concurrencyRaw : 2;
-  const enableLlmRanking = parseEnvBool(process.env.WORKER_ENABLE_LLM_RANKING, true);
+  const concurrency = getSettingNumber('WORKER_QUEUE_CONCURRENCY');
+  const enableLlmRanking = getSettingBool('WORKER_ENABLE_LLM_RANKING');
 
   const orchestrator = new WorkerOrchestrator({
     convexUrl,
     concurrency,
     enableLlmRanking,
   });
-  const convex = createWorkerConvexClient(convexUrl);
-  const schedulerConfig = loadSchedulerConfigFromEnv(process.env, { convex });
+  const schedulerConfig = loadSchedulerConfigFromSettings({ convex });
   return new WorkerScheduler(orchestrator, schedulerConfig);
 }
 
@@ -65,8 +68,14 @@ export async function startWorker(): Promise<{
   scheduler: WorkerScheduler;
   stop: () => Promise<void>;
 }> {
-  const chromeSession = await initWorkerChromeFromEnv(process.env);
-  const scheduler = createWorkerRuntime();
+  const convexUrl = requireEnv('CONVEX_URL');
+  const convex = createWorkerConvexClient(convexUrl);
+  const workerId = resolveWorkerIdFromEnv();
+  const settingsCache = initWorkerSettingsCache(convex, workerId);
+  await settingsCache.refresh();
+
+  const chromeSession = await initWorkerChromeFromEnv(settingsCache.getEnvRecord());
+  const scheduler = createWorkerRuntime(convex);
   scheduler.start();
   workerLog.info('worker.scheduler_started', {
     chrome: chromeSession ? 'deferred_until_linkedin' : 'disabled',
@@ -82,8 +91,8 @@ export async function startWorker(): Promise<{
     });
   }
   workerLog.info('linkedin.debug_steps', {
-    mode: parseLinkedInDebugSteps(process.env),
-    WORKER_LINKEDIN_DEBUG_STEPS: process.env.WORKER_LINKEDIN_DEBUG_STEPS ?? null,
+    mode: parseLinkedInDebugStepsFromResolvedEnv(settingsCache.getEnvRecord()),
+    WORKER_LINKEDIN_DEBUG_STEPS: settingsCache.getEnvRecord().WORKER_LINKEDIN_DEBUG_STEPS ?? null,
   });
 
   const triggerPort = parseTriggerServerPort(process.env);

@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as appSettings from "../appSettings.js";
 import type * as evaluators from "../evaluators.js";
 import type * as postings from "../postings.js";
 import type * as ranking from "../ranking.js";
@@ -19,6 +20,7 @@ import type * as sourceContract from "../sourceContract.js";
 import type * as sourcePresets from "../sourcePresets.js";
 import type * as sources from "../sources.js";
 import type * as workerScheduler from "../workerScheduler.js";
+import type * as workerSettingsEnv from "../workerSettingsEnv.js";
 
 import type {
   ApiFromModules,
@@ -27,6 +29,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  appSettings: typeof appSettings;
   evaluators: typeof evaluators;
   postings: typeof postings;
   ranking: typeof ranking;
@@ -38,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   sourcePresets: typeof sourcePresets;
   sources: typeof sources;
   workerScheduler: typeof workerScheduler;
+  workerSettingsEnv: typeof workerSettingsEnv;
 }>;
 
 /**

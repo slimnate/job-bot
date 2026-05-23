@@ -26,6 +26,9 @@ export function AppLayout() {
             <NavLink className={navBtnClass} to='/evaluators'>
               Evaluators
             </NavLink>
+            <NavLink className={navBtnClass} to='/settings'>
+              Settings
+            </NavLink>
           </nav>
         </div>
       </header>

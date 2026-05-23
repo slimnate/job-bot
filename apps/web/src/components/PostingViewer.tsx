@@ -4,6 +4,7 @@ import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Id } from '../../../../convex/_generated/dataModel.js';
 import { FilterSelect } from './FilterSelect';
+import { useWorkerTriggerUrl } from '../hooks/useWorkerTriggerUrl.js';
 import { formatRankRunLogLine, subscribeRankRunLogs } from '../rankRunLog.js';
 import { PostingTable, type PostingTableRow } from './PostingTable';
 
@@ -17,15 +18,15 @@ type LlmCatalogProvider = {
   models: Array<{ apiModelId: string; displayName: string }>;
 };
 
-function workerTriggerBaseUrl(): string {
-  const raw =
-    (import.meta.env.VITE_WORKER_TRIGGER_URL as string | undefined)?.trim() ??
-    'http://127.0.0.1:3999/trigger';
-  const base = raw.replace(/\/trigger\/?$/i, '').trim();
-  return base || 'http://127.0.0.1:3999';
-}
-
 export function PostingViewer() {
+  const workerTriggerUrl = useWorkerTriggerUrl();
+  const workerTriggerBaseUrl = useMemo(() => {
+    if (!workerTriggerUrl) {
+      return null;
+    }
+    const base = workerTriggerUrl.replace(/\/trigger\/?$/i, '').trim();
+    return base.length > 0 ? base : null;
+  }, [workerTriggerUrl]);
   const totalPostings = useQuery(api.postings.count);
   const evaluatorProfiles = useQuery(api.evaluators.list, { limit: 50 });
   const llmCatalog = useQuery(api.rankingLlmCatalog.listForUi) as LlmCatalogProvider[] | undefined;
@@ -204,7 +205,13 @@ export function PostingViewer() {
           setPostingMessage(`Scored ${batch.saved} posting(s) in one batch request.`);
         }
       } else {
-        const base = workerTriggerBaseUrl();
+        const base = workerTriggerBaseUrl;
+        if (!base) {
+          setScoreDialogError(
+            'Set VITE_WORKER_TRIGGER_URL in Settings or .env.local to score via the worker.'
+          );
+          return;
+        }
         const rankingRunId = crypto.randomUUID();
         setScoreRankLogs([]);
         rankLogStopRef.current = subscribeRankRunLogs(base, rankingRunId, {
