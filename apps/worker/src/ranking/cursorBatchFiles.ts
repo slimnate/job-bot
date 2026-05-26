@@ -1,13 +1,15 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
   buildEvaluatorBatchPayload,
   cursorBatchPaths,
   serializeCandidateForBatchFile,
+  validateRankingResults,
   type CursorBatchPaths,
   type RankingCandidateInput,
   type RankingEvaluatorInput,
+  type RankingResult,
 } from '@job-bot/shared';
 
 /**
@@ -32,4 +34,37 @@ export async function writeCursorRankingBatchFiles(
   );
 
   return paths;
+}
+
+/**
+ * Reads and validates the score array the agent wrote to results.json.
+ */
+export async function readCursorRankingResultsFile(
+  workspaceDir: string,
+  batchId: string
+): Promise<RankingResult[] | null> {
+  const paths = cursorBatchPaths(batchId);
+  const absolutePath = join(workspaceDir, paths.resultsPath);
+
+  try {
+    await access(absolutePath);
+  } catch {
+    return null;
+  }
+
+  let raw: string;
+  try {
+    raw = await readFile(absolutePath, 'utf8');
+  } catch {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+
+  return validateRankingResults(parsed);
 }

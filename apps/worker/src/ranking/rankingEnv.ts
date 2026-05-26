@@ -1,4 +1,5 @@
 import type { RankingPromptOptions } from '@job-bot/shared';
+import { parseAppSettingValue } from '@job-bot/shared';
 
 import { getSettingBool, getSettingNumber, getSettingString } from '../settings/settingsHelpers.js';
 
@@ -34,8 +35,29 @@ export function shouldKeepCursorBatchFiles(): boolean {
   return getSettingBool('LLM_RANKING_CURSOR_KEEP_BATCH_FILES');
 }
 
-export function loadCursorFileExtraTimeoutMs(): number {
-  return getSettingNumber('LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS');
+const LEGACY_CURSOR_EXTRA_TIMEOUT_KEY = 'LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS';
+
+/**
+ * Extra timeout (ms) for Cursor ranking when using workspace files (inputs + results.json).
+ * Falls back to legacy `LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS` in env or stored settings.
+ */
+export function loadCursorExtraTimeoutMs(): number {
+  const envNew = process.env.LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS?.trim();
+  const envLegacy = process.env[LEGACY_CURSOR_EXTRA_TIMEOUT_KEY]?.trim();
+  const envRaw = envNew || envLegacy;
+  if (envRaw) {
+    const parsed = parseAppSettingValue('LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS', envRaw);
+    if (typeof parsed === 'number') {
+      return parsed;
+    }
+  }
+
+  return getSettingNumber('LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS');
+}
+
+/** Default chunk size for Cursor ranking (0 disables chunking). */
+export function loadCursorChunkSize(): number {
+  return getSettingNumber('LLM_RANKING_CURSOR_CHUNK_SIZE');
 }
 
 export function isCursorMinimalContextEnabled(): boolean {

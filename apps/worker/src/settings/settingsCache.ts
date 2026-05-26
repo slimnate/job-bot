@@ -61,6 +61,11 @@ export class WorkerSettingsCache {
     return resolveAllSettingsRaw(this.input());
   }
 
+  /** Raw value from Convex `app_settings` only (includes deprecated keys not in the catalog). */
+  getStoredValue(key: string): string | undefined {
+    return this.stored[key];
+  }
+
   /**
    * Env-like record for modules that read string keys (LinkedIn scrape, etc.).
    * Includes resolved app settings plus env-only keys from process.env unchanged.

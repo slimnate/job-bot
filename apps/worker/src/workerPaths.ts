@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url';
  */
 export function getWorkerPackageRoot(): string {
   const thisFile = fileURLToPath(import.meta.url);
-  const rankingOrRootDir = path.dirname(thisFile);
-  const basename = path.basename(rankingOrRootDir);
-  if (basename === 'ranking') {
-    return path.resolve(rankingOrRootDir, '../..');
+  let dir = path.dirname(thisFile);
+  const nested = new Set(['src', 'dist', 'ranking']);
+  while (nested.has(path.basename(dir))) {
+    dir = path.resolve(dir, '..');
   }
-  return rankingOrRootDir;
+  return dir;
 }
 
 /** Monorepo root (`job-bot/`) when the worker package lives at `apps/worker`. */

@@ -1,7 +1,5 @@
 import { spawn } from 'node:child_process';
 
-import { loadCursorDefaultModel } from './rankingEnv.js';
-
 const MAX_ERROR_SNIPPET_CHARS = 6_000;
 
 /** Legacy catalog / env values that are not valid `cursor-agent --model` ids. */
@@ -12,6 +10,34 @@ const CURSOR_MODEL_ALIASES: Record<string, string> = {
 
 /** Placeholder from `ranking.recompute` when no model is chosen; use worker settings instead. */
 const RANKING_MODEL_PLACEHOLDERS = new Set(['llm-default', '']);
+
+/**
+ * Returns a settings/env model override, or undefined when the caller passed a placeholder.
+ */
+export function effectiveRankingModelOverride(modelOverride?: string): string | undefined {
+  const trimmed = modelOverride?.trim();
+  if (!trimmed || RANKING_MODEL_PLACEHOLDERS.has(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+/**
+ * Resolves Cursor CLI model id from an explicit default (no settings I/O).
+ */
+export function resolveCursorApiModelIdWithDefault(
+  modelOverride: string | undefined,
+  defaultModel: string
+): string {
+  const override = effectiveRankingModelOverride(modelOverride);
+  const raw = (override ?? defaultModel).trim();
+  if (!raw) {
+    throw new Error(
+      'LLM_RANKING_CURSOR_MODEL is empty; set it in Settings or LLM_RANKING_CURSOR_MODEL env.'
+    );
+  }
+  return CURSOR_MODEL_ALIASES[raw] ?? raw;
+}
 
 export type CursorCliConfig = {
   command: string;
@@ -77,36 +103,32 @@ export function flushCursorCliLineBuffer(buffer: CursorCliLineBuffer): string | 
 }
 
 /**
- * Resolves the Cursor CLI model id (aliases invalid catalog seeds; default `auto`).
- */
-/**
- * Returns a settings/env model override, or undefined when the caller passed a placeholder.
- */
-export function effectiveRankingModelOverride(modelOverride?: string): string | undefined {
-  const trimmed = modelOverride?.trim();
-  if (!trimmed || RANKING_MODEL_PLACEHOLDERS.has(trimmed)) {
-    return undefined;
-  }
-  return trimmed;
-}
-
-export function resolveCursorApiModelId(modelOverride?: string): string {
-  const fromSettings = loadCursorDefaultModel().trim();
-  const override = effectiveRankingModelOverride(modelOverride);
-  const raw = (override ?? fromSettings).trim();
-  if (!raw) {
-    throw new Error(
-      'LLM_RANKING_CURSOR_MODEL is empty; set it in Settings or LLM_RANKING_CURSOR_MODEL env.'
-    );
-  }
-  return CURSOR_MODEL_ALIASES[raw] ?? raw;
-}
-
-/**
  * True when `args` already includes a flag like `--mode` or `--mode=ask`.
  */
 export function hasCliArgFlag(args: string[], flag: string): boolean {
   return args.some((arg) => arg === flag || arg.startsWith(`${flag}=`));
+}
+
+/**
+ * Forces `--output-format json` for ranking (removes text/stream-json output-format flags).
+ */
+export function enforceRankingJsonOutputFormat(args: string[]): string[] {
+  const withoutOutputFormat: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (arg === '--output-format' || arg === '-o') {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--output-format=')) {
+      continue;
+    }
+    withoutOutputFormat.push(arg);
+  }
+  if (!hasCliArgFlag(withoutOutputFormat, '--output-format')) {
+    withoutOutputFormat.push('--output-format', 'json');
+  }
+  return withoutOutputFormat;
 }
 
 /**
@@ -117,7 +139,7 @@ export function buildCursorCliArgs(
   prompt: string,
   options: { minimalContext?: boolean } = {}
 ): string[] {
-  let args = [...config.args];
+  let args = enforceRankingJsonOutputFormat([...config.args]);
   const minimal = options.minimalContext ?? true;
 
   if (minimal) {
@@ -272,18 +294,44 @@ function flushStreamLines(
  * Runs Cursor CLI and returns stdout/stderr. Streams each output line to worker logs when enabled.
  * Throws a detailed error on failure.
  */
+export type CursorCliJsonEnvelope = {
+  type?: string;
+  subtype?: string;
+  is_error?: boolean;
+  duration_ms?: number;
+  duration_api_ms?: number;
+  result?: string;
+};
+
+/**
+ * Parses the final `--output-format json` line from Cursor CLI stdout (status only).
+ */
+export function parseCursorCliJsonEnvelope(stdout: string): CursorCliJsonEnvelope | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed) as CursorCliJsonEnvelope;
+  } catch {
+    return null;
+  }
+}
+
 export async function runCursorCli(params: {
   config: CursorCliConfig;
   args: string[];
   prompt: string;
   timeoutMs: number;
   cwd: string;
+  /** When true, exit code 0 with empty stdout is allowed (ranking reads results from disk). */
+  allowEmptyStdout?: boolean;
   /** Invoked for each stdout/stderr line (and any trailing fragment without a final newline). */
   onOutputLine?: CursorCliOutputLineHandler;
   /** Called once when the child process is spawned (before streaming output). */
   onSpawn?: (details: { commandLine: string; timeoutMs: number; cwd: string }) => void;
 }): Promise<CursorCliRunResult> {
-  const { config, args, prompt, timeoutMs, cwd, onOutputLine, onSpawn } = params;
+  const { config, args, prompt, timeoutMs, cwd, allowEmptyStdout, onOutputLine, onSpawn } = params;
 
   onSpawn?.({
     commandLine: formatCursorCliCommandLine(config.command, args, prompt),
@@ -352,12 +400,27 @@ export async function runCursorCli(params: {
       const exitSignal = signal;
 
       if (exitCode === 0 && !timedOut) {
-        if (!stdout.trim() && stderr.trim()) {
+        if (!stdout.trim() && stderr.trim() && !allowEmptyStdout) {
           reject(
             new Error(
               formatCursorCliFailure({
                 reason:
                   'Cursor CLI wrote to stderr and produced no stdout (often a model or flag error).',
+                command: config.command,
+                args,
+                prompt,
+                stderr,
+                stdout,
+              })
+            )
+          );
+          return;
+        }
+        if (!stdout.trim() && !stderr.trim() && !allowEmptyStdout) {
+          reject(
+            new Error(
+              formatCursorCliFailure({
+                reason: 'Cursor CLI produced empty stdout.',
                 command: config.command,
                 args,
                 prompt,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { writeCursorRankingBatchFiles } from './cursorBatchFiles.ts';
+import { readCursorRankingResultsFile, writeCursorRankingBatchFiles } from './cursorBatchFiles.ts';
 
 describe('cursorBatchFiles', () => {
   it('writes postings array with full descriptions', async () => {
@@ -26,6 +26,47 @@ describe('cursorBatchFiles', () => {
       const postings = JSON.parse(raw);
       assert.equal(postings.length, 1);
       assert.equal(postings[0].descriptionSnippet.length, 5000);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('readCursorRankingResultsFile validates results.json', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'job-bot-batch-'));
+    try {
+      const batchId = 'results-batch';
+      await writeCursorRankingBatchFiles(workspace, batchId, { name: 'Dev' }, [
+        {
+          _id: 'id-1',
+          title: 'Engineer',
+          company: 'Co',
+          source: 'linkedin',
+          url: 'https://example.com/1',
+        },
+      ]);
+
+      assert.equal(await readCursorRankingResultsFile(workspace, batchId), null);
+
+      const { writeFile } = await import('node:fs/promises');
+      const { cursorBatchPaths } = await import('@job-bot/shared');
+      const paths = cursorBatchPaths(batchId);
+      await writeFile(
+        join(workspace, paths.resultsPath),
+        JSON.stringify([
+          {
+            postingId: 'id-1',
+            scoreOverall: 80,
+            reasoningSummary: 'Good fit',
+            criteriaMatch: { technicalFit: 20 },
+            redFlags: [],
+          },
+        ]),
+        'utf8'
+      );
+
+      const results = await readCursorRankingResultsFile(workspace, batchId);
+      assert.equal(results?.length, 1);
+      assert.equal(results?.[0]?.scoreOverall, 80);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

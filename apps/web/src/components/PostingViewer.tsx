@@ -8,7 +8,7 @@ import { useWorkerTriggerUrl } from '../hooks/useWorkerTriggerUrl.js';
 import { formatRankRunLogLine, subscribeRankRunLogs } from '../rankRunLog.js';
 import { PostingTable, type PostingTableRow } from './PostingTable';
 
-type PostingSort = 'discoveredAtDesc' | 'postedAtDesc' | 'scoreDesc';
+type PostingSort = 'discoveredAtDesc' | 'rankedAtDesc' | 'postedAtDesc' | 'scoreDesc';
 type PostingRankStatus = 'all' | 'ranked' | 'unranked';
 
 type LlmCatalogProvider = {
@@ -479,7 +479,8 @@ export function PostingViewer() {
             max={100}
           />
           <select value={postingSort} onChange={(event) => setPostingSort(event.target.value as PostingSort)}>
-            <option value='scoreDesc'>Score (desc)</option>
+            <option value='scoreDesc'>Score (high to low)</option>
+            <option value='rankedAtDesc'>Ranked (newest)</option>
             <option value='discoveredAtDesc'>Discovered (newest)</option>
             <option value='postedAtDesc'>Posted (newest)</option>
           </select>

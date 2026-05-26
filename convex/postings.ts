@@ -42,6 +42,7 @@ export const list = query({
     sort: v.optional(
       v.union(
         v.literal('discoveredAtDesc'),
+        v.literal('rankedAtDesc'),
         v.literal('postedAtDesc'),
         v.literal('scoreDesc')
       )
@@ -97,6 +98,10 @@ export const list = query({
     postingsWithRanking.sort((a, b) => {
       if (sortBy === 'scoreDesc') {
         return (b.latestRanking?.scoreOverall ?? -1) - (a.latestRanking?.scoreOverall ?? -1);
+      }
+
+      if (sortBy === 'rankedAtDesc') {
+        return (b.latestRanking?.rankedAt ?? -1) - (a.latestRanking?.rankedAt ?? -1);
       }
 
       if (sortBy === 'postedAtDesc') {

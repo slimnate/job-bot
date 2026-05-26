@@ -9,8 +9,10 @@ export type CursorBatchPaths = {
   batchDir: string;
   postingsPath: string;
   evaluatorPath: string;
+  resultsPath: string;
   postingsRelative: string;
   evaluatorRelative: string;
+  resultsRelative: string;
 };
 
 /**
@@ -22,20 +24,26 @@ export function cursorBatchPaths(batchId: string): CursorBatchPaths {
     batchDir,
     postingsPath: `${batchDir}/postings.json`,
     evaluatorPath: `${batchDir}/evaluator.json`,
+    resultsPath: `${batchDir}/results.json`,
     postingsRelative: `${batchDir}/postings.json`,
     evaluatorRelative: `${batchDir}/evaluator.json`,
+    resultsRelative: `${batchDir}/results.json`,
   };
 }
 
 /**
- * Short argv prompt: agent reads batch files via tools and returns a JSON score array.
+ * Short argv prompt: agent reads input batch files and writes scores to results.json.
  */
-export function buildCursorFileRankingPrompt(batchId: string, postingIds: string[]): string {
+export function buildCursorFileRankingPrompt(
+  batchId: string,
+  postingIds: string[],
+  options: { forceResultsFileReminder?: boolean } = {}
+): string {
   const paths = cursorBatchPaths(batchId);
   const idList = postingIds.map((id) => `- ${id}`).join('\n');
 
-  return [
-    'Score each job posting independently for the evaluator profile in the batch files.',
+  const lines = [
+    'Score each job posting independently for the evaluator profile in the workspace files.',
     'Use your file read tool ONLY for these paths (do not search the workspace or codebase):',
     `- ${paths.evaluatorRelative}`,
     `- ${paths.postingsRelative}`,
@@ -44,20 +52,28 @@ export function buildCursorFileRankingPrompt(batchId: string, postingIds: string
     '- Read evaluator.json for profile name, resume, and user scoring instructions.',
     '- Read postings.json (array of jobs with full descriptions).',
     '- Score each posting 0-100 on its own merit; do not rank postings against each other.',
-    '- Return one JSON array only (no markdown fences, no prose).',
+    `- Write the full score array to ${paths.resultsRelative} using your write tool (overwrite the file).`,
+    '- Do not put the score array on stdout; a short confirmation line is fine.',
     '',
-    'Each array element must include:',
-    '- postingId (exact string from the file)',
+    'Each results.json array element must include:',
+    '- postingId (exact string from postings.json)',
     '- scoreOverall (0-100)',
     '- reasoningSummary',
-    '- criteriaMatch (object)',
+    '- criteriaMatch (object, not an array)',
     '- redFlags (string array, may be empty)',
     '',
     'Expected postingId values (one result each):',
     idList,
-    '',
-    'Return the JSON array only.',
-  ].join('\n');
+  ];
+
+  if (options.forceResultsFileReminder) {
+    lines.push(
+      '',
+      `IMPORTANT: You must write valid JSON to ${paths.resultsRelative} with exactly one object per postingId above.`
+    );
+  }
+
+  return lines.join('\n');
 }
 
 /** Payload shape for evaluator.json in a Cursor batch directory. */

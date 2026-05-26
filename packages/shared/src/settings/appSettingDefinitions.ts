@@ -70,11 +70,11 @@ export const APP_SETTING_SECTION_DESCRIPTIONS: Record<AppSettingSection, string>
   http_openai:
     'OpenAI-compatible API base URL and sampling temperature for HTTP ranking (API key remains env-only).',
   cursor_cli:
-    'cursor-agent executable, workspace directory, extra batch timeouts, minimal CLI context, and output logging.',
+    'cursor-agent executable, workspace directory, ranking timeouts, chunk size, CLI logging, and whether to keep ranking run files on disk for debugging.',
   web:
     'Worker trigger URL for scrape-queue Trigger now and Postings Cursor scoring (overridable via Vite env).',
   advanced:
-    'Cursor batch files vs inline prompts and whether ranking batch directories are kept on disk for debugging.',
+    'Cursor batch files vs inline prompts for ranking (legacy debugging toggles).',
 };
 
 /** Catalog entry with a typed allowlisted key. */
@@ -305,10 +305,19 @@ export const APP_SETTING_DEFINITIONS: readonly AppSettingDefinition[] = [
     section: 'cursor_cli',
   }),
   settingDef({
-    key: 'LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS',
-    label: 'Cursor batch files extra timeout (ms)',
+    key: 'LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS',
+    label: 'Cursor ranking extra timeout (ms)',
     hint:
-      'Additional timeout when ranking via postings.json batch files (default 90000). LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS in env overrides this value.',
+      'Additional milliseconds added to the base ranking timeout when Cursor reads/writes workspace files under .ranking-batches/ (inputs + results.json). Default 90000. LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS in env overrides this value. Legacy env LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS is still accepted.',
+    type: 'number',
+    section: 'cursor_cli',
+    min: 0,
+  }),
+  settingDef({
+    key: 'LLM_RANKING_CURSOR_CHUNK_SIZE',
+    label: 'Cursor ranking chunk size',
+    hint:
+      'Maximum postings per Cursor CLI invocation (default 12). Larger selections are split into multiple runs. Set to 0 to disable chunking. LLM_RANKING_CURSOR_CHUNK_SIZE in env overrides this value.',
     type: 'number',
     section: 'cursor_cli',
     min: 0,
@@ -326,6 +335,14 @@ export const APP_SETTING_DEFINITIONS: readonly AppSettingDefinition[] = [
     label: 'Log Cursor CLI stdout/stderr',
     hint:
       'When enabled (default), each cursor-agent output line is logged as llm.rank.cursor_cli.output during ranking. Set to off to reduce log volume. LLM_RANKING_CURSOR_LOG_OUTPUT=0 in env overrides a saved “on” value.',
+    type: 'boolean',
+    section: 'cursor_cli',
+  }),
+  settingDef({
+    key: 'LLM_RANKING_CURSOR_KEEP_BATCH_FILES',
+    label: 'Keep Cursor ranking files on disk',
+    hint:
+      'When enabled, leaves each run’s directory under ranking-cli-workspace/.ranking-batches/ after ranking (postings.json, evaluator.json, results.json) for inspection. Default off. LLM_RANKING_CURSOR_KEEP_BATCH_FILES=1 in env overrides a saved “off” value.',
     type: 'boolean',
     section: 'cursor_cli',
   }),
@@ -350,14 +367,6 @@ export const APP_SETTING_DEFINITIONS: readonly AppSettingDefinition[] = [
     label: 'Cursor force inline prompt',
     hint:
       'When enabled, puts all posting text in the argv prompt instead of batch files (default off). Use only for debugging small jobs. LLM_RANKING_CURSOR_INLINE_PROMPT=1 in env overrides a saved “off” value.',
-    type: 'boolean',
-    section: 'advanced',
-  }),
-  settingDef({
-    key: 'LLM_RANKING_CURSOR_KEEP_BATCH_FILES',
-    label: 'Keep Cursor batch files on disk',
-    hint:
-      'When enabled, leaves batch directories after ranking for inspection (default off). LLM_RANKING_CURSOR_KEEP_BATCH_FILES=1 in env overrides a saved “off” value.',
     type: 'boolean',
     section: 'advanced',
   }),

@@ -28,7 +28,8 @@ export const SYSTEM_SETTING_DEFAULTS = {
   LLM_RANKING_TEMPERATURE: '0.1',
   CURSOR_CLI_COMMAND: 'cursor-agent',
   CURSOR_CLI_WORKSPACE: 'apps/worker/ranking-cli-workspace',
-  LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS: '90000',
+  LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS: '90000',
+  LLM_RANKING_CURSOR_CHUNK_SIZE: '12',
   LLM_RANKING_CURSOR_MINIMAL_CONTEXT: 'true',
   LLM_RANKING_CURSOR_LOG_OUTPUT: 'true',
   VITE_WORKER_TRIGGER_URL: 'http://127.0.0.1:3999/trigger',
@@ -79,6 +80,12 @@ export function buildSeedPatch(
   const patch: Record<string, string> = {};
   for (const key of listMissingSettingKeys(stored)) {
     patch[key] = getSystemDefault(key);
+  }
+  if (stored?.LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS === undefined) {
+    const legacy = stored?.LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS;
+    if (legacy !== undefined && legacy.trim() !== '') {
+      patch.LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS = legacy.trim();
+    }
   }
   return patch;
 }
