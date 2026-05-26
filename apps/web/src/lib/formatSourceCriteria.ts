@@ -1,4 +1,4 @@
-import { formatRemotiveCategoriesForDisplay } from '@job-bot/shared';
+import { formatGreenhouseCriteriaForDisplay, formatRemotiveCategoriesForDisplay } from '@job-bot/shared';
 
 /**
  * Formats scrape run source criteria for display in queue/history tables.
@@ -13,6 +13,10 @@ export function formatSourceCriteriaSummary(
 
   if (source.trim().toLowerCase() === 'remotive') {
     return formatRemotiveCategoriesForDisplay(sourceCriteria.categories);
+  }
+
+  if (source.trim().toLowerCase() === 'greenhouse') {
+    return formatGreenhouseCriteriaForDisplay(sourceCriteria);
   }
 
   return Object.entries(sourceCriteria)

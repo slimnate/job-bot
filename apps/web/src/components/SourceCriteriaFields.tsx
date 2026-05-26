@@ -1,9 +1,18 @@
 import { RemotiveCategoryPicker } from './RemotiveCategoryPicker.js';
 
+export type CriteriaFieldMeta = {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  placeholder?: string;
+};
+
 type SourceCriteriaFieldsProps = {
   fields: string[];
   values: Record<string, string>;
   onChange: (values: Record<string, string>) => void;
+  /** Optional per-field labels, hints, and placeholders (from source contract). */
+  fieldMeta?: Record<string, CriteriaFieldMeta>;
   /** Labeled inputs for forms; compact inputs for queue table cells. */
   variant?: 'labeled' | 'compact';
   className?: string;
@@ -19,6 +28,17 @@ function partitionCriteriaFields(fields: string[]) {
   return { search, location, categories, rest };
 }
 
+function fieldLabel(field: string, meta?: CriteriaFieldMeta): string {
+  return meta?.label ?? field;
+}
+
+function fieldPlaceholder(field: string, variant: 'labeled' | 'compact', meta?: CriteriaFieldMeta): string {
+  if (meta?.placeholder) {
+    return meta.placeholder;
+  }
+  return variant === 'compact' ? field : `Enter ${field}`;
+}
+
 /**
  * Renders source criteria inputs. `search` and `location` share a row on large screens (stacked on small).
  */
@@ -26,6 +46,7 @@ export function SourceCriteriaFields({
   fields,
   values,
   onChange,
+  fieldMeta,
   variant = 'labeled',
   className,
 }: SourceCriteriaFieldsProps) {
@@ -36,14 +57,22 @@ export function SourceCriteriaFields({
   };
 
   const renderInput = (field: string, fullWidth: boolean) => {
+    const meta = fieldMeta?.[field];
+    const label = fieldLabel(field, meta);
     const input = (
       <input
         value={values[field] ?? ''}
         onChange={(event) => onFieldChange(field, event.target.value)}
-        placeholder={variant === 'compact' ? field : `Enter ${field}`}
-        aria-label={field}
+        placeholder={fieldPlaceholder(field, variant, meta)}
+        aria-label={label}
+        required={meta?.required === true}
       />
     );
+
+    const hint =
+      variant === 'labeled' && meta?.hint ? (
+        <span className='source-criteria-field-hint'>{meta.hint}</span>
+      ) : null;
 
     if (variant === 'compact') {
       return (
@@ -61,8 +90,10 @@ export function SourceCriteriaFields({
         key={field}
         className={fullWidth ? 'source-criteria-field source-criteria-field-full' : 'source-criteria-field'}
       >
-        {field}
+        {label}
+        {meta?.required ? <span className='source-criteria-required'> (required)</span> : null}
         {input}
+        {hint}
       </label>
     );
   };

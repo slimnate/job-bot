@@ -114,6 +114,14 @@ export function deriveSourceAndExternalId(url: string): { source: string; extern
   if (remotiveListing?.[1]) {
     return { source: 'remotive', externalId: remotiveListing[1] };
   }
+  const greenhouseJob = url.match(/boards\.greenhouse\.io\/[^/]+\/jobs\/(\d+)/i);
+  if (greenhouseJob?.[1]) {
+    return { source: 'greenhouse', externalId: greenhouseJob[1] };
+  }
+  const greenhouseJid = url.match(/[?&]gh_jid=(\d+)/i);
+  if (greenhouseJid?.[1]) {
+    return { source: 'greenhouse', externalId: greenhouseJid[1] };
+  }
   return null;
 }
 

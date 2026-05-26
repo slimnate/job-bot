@@ -23,7 +23,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 - Sources (`/sources`, `apps/web/src/components/SourcesManager.tsx`) with:
   - source **Enabled** on/off toggle (disabled sources are omitted from the queue source picker)
   - read-only accepted criteria fields (code-defined contracts)
-  - source preset management for **LinkedIn** — **Add preset** opens the criteria form; **Edit** / **Duplicate** open it prefilled; create, edit, duplicate, and delete reusable criteria combinations
+  - source preset management for **LinkedIn** and **Greenhouse** — **Add preset** opens the criteria form; **Edit** / **Duplicate** open it prefilled; create, edit, duplicate, and delete reusable criteria combinations
   - **Remotive** has no presets; use category checkboxes on the Workers queue instead
 - Convex backend with schema + APIs for:
   - Evaluator management (`convex/evaluators.ts`)
@@ -39,7 +39,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - Cron-like scheduler (`apps/worker/src/scheduler.ts`)
   - In-memory bounded queue abstraction (`apps/worker/src/queue.ts`)
   - Run orchestration pipeline (`apps/worker/src/orchestrator.ts`)
-  - Source adapters (`apps/worker/src/sourceAdapters.ts`): **LinkedIn** (Chrome/CDP) and **Remotive** (public RSS feeds)
+  - Source adapters (`apps/worker/src/sourceAdapters.ts`): **LinkedIn** (Chrome/CDP), **Remotive** (public RSS feeds), and **Greenhouse** (public Job Board API over HTTP)
 - Shared package and agent-core placeholders:
   - Ranking type in `packages/shared/src/schemas/ranking.ts`
   - Agent core stub in `packages/agent-core/src/index.ts`
@@ -50,7 +50,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 2. Runs are queued either:
    - manually from the dashboard (`runs.trigger`), optionally with an explicit `source`, `sourceCriteria`, and `evaluatorId`.
 3. Worker dequeues runs with bounded concurrency.
-4. Worker collects postings for a source (**LinkedIn** and **Remotive** implemented; other sources fail fast). **LinkedIn:** opens `/jobs/`, waits for a signed-in jobs UI (optional `LINKEDIN_USER` / `LINKEDIN_PASS` auto-login, or sign in manually in the Chrome window). When `sourceCriteria.search` is set, it runs a **UI-only** search on `/jobs/`: the SDUI typeahead receives `"<search> in <location>"` when location is also set, or just the search term when location is omitted. With empty `search`, the preferences hub path runs (“Show all”); `location` without `search` is ignored. The listing/detail scraper expands “About the job” when possible and persists the **full** job description with line breaks in `job_postings.descriptionSnippet`. LinkedIn scrape cleanup tears down Chrome after each run by default (`WORKER_AUTO_CLEANUP_CHROME=1`). **Remotive:** fetches public RSS feeds over HTTP (`https://remotive.com/remote-jobs/feed` when no categories are selected, or one feed per selected category slug). Queue criteria use comma-separated category slugs from the [Remotive category list](https://remotive.com/remote-jobs/rss-feed) (see `packages/shared/src/sources/remotiveCategories.ts`). Respect [Remotive’s RSS terms](https://remotive.com/remote-jobs/rss-feed): link back to listing URLs and mention Remotive as the source; do not repost to third-party job aggregators. Settings → **Remotive scraping**: `WORKER_REMOTIVE_MAX_POSTINGS` (optional cap) and `WORKER_REMOTIVE_FETCH_TIMEOUT_MS` (per-feed timeout; env overrides).
+4. Worker collects postings for a source (**LinkedIn**, **Remotive**, and **Greenhouse** implemented; other sources fail fast). **LinkedIn:** opens `/jobs/`, waits for a signed-in jobs UI (optional `LINKEDIN_USER` / `LINKEDIN_PASS` auto-login, or sign in manually in the Chrome window). When `sourceCriteria.search` is set, it runs a **UI-only** search on `/jobs/`: the SDUI typeahead receives `"<search> in <location>"` when location is also set, or just the search term when location is omitted. With empty `search`, the preferences hub path runs (“Show all”); `location` without `search` is ignored. The listing/detail scraper expands “About the job” when possible and persists the **full** job description with line breaks in `job_postings.descriptionSnippet`. LinkedIn scrape cleanup tears down Chrome after each run by default (`WORKER_AUTO_CLEANUP_CHROME=1`). **Remotive:** fetches public RSS feeds over HTTP (`https://remotive.com/remote-jobs/feed` when no categories are selected, or one feed per selected category slug). Queue criteria use comma-separated category slugs from the [Remotive category list](https://remotive.com/remote-jobs/rss-feed) (see `packages/shared/src/sources/remotiveCategories.ts`). Respect [Remotive’s RSS terms](https://remotive.com/remote-jobs/rss-feed): link back to listing URLs and mention Remotive as the source; do not repost to third-party job aggregators. Settings → **Remotive scraping**: `WORKER_REMOTIVE_MAX_POSTINGS` (optional cap) and `WORKER_REMOTIVE_FETCH_TIMEOUT_MS` (per-feed timeout; env overrides). **Greenhouse:** fetches the public [Job Board API](https://developers.greenhouse.io/job-board.html) (`GET https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs?content=true`) — no API key for reads. One company per run via required `boardToken`; optional client-side filters `keyword`, `department`, `office`, and `includeProspects` (`true` / `yes` / `1`). Prospect posts (`internal_job_id` null) are excluded unless `includeProspects` is set. `postedAt` is derived from Greenhouse `updated_at` (last update, not necessarily first publish). Salary ranges are not fetched in v1 (would require per-job detail calls with `pay_transparency=true`).
 5. Worker upserts postings in Convex (`postings.upsertBatch`).
 6. Worker scores postings with the LLM: **Cursor** = one or more CLI runs (workspace files under `ranking-cli-workspace/.ranking-batches/`, scores in `results.json`); **HTTP** = one API call per posting. Uses the **run’s** `evaluatorId` when set, otherwise **`job_sources.defaultEvaluatorId`** for that source (Sources page), otherwise **`WORKER_DEFAULT_EVALUATOR_ID`** on that worker process. Each posting gets an independent `scoreOverall` (no global rank). Results are persisted via `ranking.upsertResults` unless disabled with `WORKER_ENABLE_LLM_RANKING=0` during testing.
 7. Worker marks run status and stats (`runs.updateStatus`).
@@ -73,7 +73,7 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `job_sources`: source enablement metadata (`source`, `displayName`, `isEnabled`, optional `defaultEvaluatorId` for ranking when a run has no evaluator)
 - `source_presets`: reusable source criteria combinations (`source`, `name`, `sourceCriteria`)
 - `scrape_runs`: run status, timing, logs summary, aggregate stats
-- `scrape_runs.sourceCriteria`: source-specific run criteria payload (LinkedIn: optional `search`; optional `location` only when `search` is set; Remotive: optional comma-separated `categories` slugs — empty → all-jobs feed)
+- `scrape_runs.sourceCriteria`: source-specific run criteria payload (LinkedIn: optional `search`; optional `location` only when `search` is set; Remotive: optional comma-separated `categories` slugs — empty → all-jobs feed; Greenhouse: required `boardToken`, optional `keyword`, `department`, `office`, `includeProspects`)
 - `scrape_runs.linkedinSearchStrategy`: records LinkedIn search path (`ui` for criteria-driven search, `preferences_hub` when criteria are empty; legacy runs may still show `search_url` / `url_fallback`)
 - `scrape_runs.usedLinkedinUrlFallback`: boolean warning flag for URL fallback usage
 - `scrape_runs.linkedinFallbackReason`: structured reason when fallback is used
@@ -336,6 +336,19 @@ curl -s -X POST http://127.0.0.1:3999/ingest-posting \
 - `npm run populate:ranking-catalog` — fetches OpenAI `/v1/models` (chat-oriented filter) and merges the full Cursor CLI catalog from `@job-bot/shared` into Convex (`rankingLlmCatalog.replaceCatalog`). Requires `CONVEX_URL` and `OPENAI_API_KEY` for live OpenAI rows. Build shared first if imports fail: `npm run build --workspace @job-bot/shared`.
 - `npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog` — replaces only Cursor provider models (111 rows); does not wipe OpenAI catalog rows.
 - `npm run trigger:linkedin` — if nothing responds on the worker HTTP trigger port, builds (unless `--skip-worker-build`) and **imports the worker in the same Node process** (`startWorker()`), so worker logs and errors print in your terminal. Queues a LinkedIn scrape, runs **`scheduler.runNow()`** (no HTTP hop when embedded), waits until Convex reports a terminal run status (override timeout with `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS`). If a worker is already listening on the trigger port, only queues + **POST /trigger** is used. Loads `.env.local` via Node’s `--env-file`. Criteria are sent as `sourceCriteria`: `npm run trigger:linkedin -- --query "your terms"` and optionally `… --location "Austin, TX"` (searched as `your terms in Austin, TX` in the LinkedIn UI; omit `--location` to use your profile location). Flags: `--no-start-worker`, `--skip-worker-build`, `--no-wait` (exit before polling run completion).
+- `npm run trigger:greenhouse` — same embedded-worker pattern as LinkedIn, but for Greenhouse. Requires `--board-token` (slug or full `boards.greenhouse.io` URL). Optional: `--keyword`, `--department`, `--office`, `--include-prospects`. Poll timeout defaults to 10 minutes (`TRIGGER_GREENHOUSE_RUN_TIMEOUT_MS` to override).
+
+### Greenhouse board token
+
+The **board token** is the public slug in a company’s Greenhouse careers URL ([Job Board API docs](https://developers.greenhouse.io/job-board.html)):
+
+| Where you see it | Example | Token |
+|------------------|---------|-------|
+| Hosted board | `https://boards.greenhouse.io/stripe/jobs/123` | `stripe` |
+| Embed widget | `https://job-boards.greenhouse.io/embed/job_board?for=figma` | `figma` (from `for=`) |
+| API probe | `GET https://boards-api.greenhouse.io/v1/boards/stripe` | returns `{ "name": "…" }` or 404 |
+
+Custom careers domains often hide the token in the hostname — open a job page, inspect apply links or network requests for `greenhouse.io` or `boards-api.greenhouse.io`. There is no API to list all companies; use one token per scrape run (or save presets on the Sources page). Paste a full URL into **Board token**; it is normalized to the slug automatically.
 
 Per workspace:
 

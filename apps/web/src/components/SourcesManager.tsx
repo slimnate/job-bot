@@ -5,12 +5,13 @@ import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
 import { PlusIcon } from './PlusIcon.js';
-import { SourceCriteriaFields } from './SourceCriteriaFields.js';
+import { SourceCriteriaFields, type CriteriaFieldMeta } from './SourceCriteriaFields.js';
 
 type SourceRow = {
   source: string;
   displayName: string;
   acceptedCriteriaFields: string[];
+  criteriaFieldMeta?: Record<string, CriteriaFieldMeta>;
   isEnabled: boolean;
   defaultEvaluatorId?: Id<'job_evaluators'>;
 };
@@ -178,7 +179,7 @@ export function SourcesManager() {
       <p className='panel-subtitle tight'>
         Source criteria fields are code-managed. Use this page to enable sources, set the default
         ranking evaluator for runs without an explicit evaluator, and manage reusable criteria presets
-        (LinkedIn only; Remotive uses category selection on the queue).
+        (LinkedIn and Greenhouse; Remotive uses category selection on the queue).
       </p>
       <div className='criteria-editor-layout'>
         <aside className='criteria-profile-sidebar'>
@@ -230,6 +231,21 @@ export function SourcesManager() {
               <p className='field-hint'>
                 Accepted criteria fields: {acceptedFields.join(', ') || 'none'}
               </p>
+              {source.criteriaFieldMeta ? (
+                <ul className='source-criteria-meta-readonly field-hint full-width'>
+                  {acceptedFields.map((field) => {
+                    const meta = source.criteriaFieldMeta?.[field];
+                    if (!meta?.hint) {
+                      return null;
+                    }
+                    return (
+                      <li key={field}>
+                        <strong>{meta.label ?? field}:</strong> {meta.hint}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
               <label className='full-width'>
                 Default evaluator (ranking when a queued run has no evaluator)
                 <select
@@ -277,6 +293,7 @@ export function SourcesManager() {
                         fields={acceptedFields}
                         values={draftValues}
                         onChange={setDraftValues}
+                        fieldMeta={source.criteriaFieldMeta}
                       />
                       {presetFormMode === 'edit' ? (
                         <p className='field-hint full-width'>

@@ -400,6 +400,25 @@ label {
   width: 100%;
 }
 
+.source-criteria-field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.source-criteria-required {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.source-criteria-meta-readonly {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
 .source-criteria-field-label {
   display: block;
   margin-bottom: 0.35rem;

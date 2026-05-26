@@ -1,6 +1,6 @@
 import { mutation, query } from './_generated/server.js';
 import { v } from 'convex/values';
-import { sourceDefinitions, sourceKeyValidator } from './sourceContract.js';
+import { getCriteriaFieldMeta, sourceDefinitions, sourceKeyValidator } from './sourceContract.js';
 
 import type { Id } from './_generated/dataModel.js';
 
@@ -15,10 +15,12 @@ export const list = query({
 
     return Object.entries(sourceDefinitions).map(([source, definition]) => {
       const row = rowBySource.get(source);
+      const criteriaFieldMeta = getCriteriaFieldMeta(source);
       return {
         source,
         displayName: definition.displayName,
         acceptedCriteriaFields: [...definition.acceptedCriteriaFields],
+        criteriaFieldMeta: criteriaFieldMeta ? { ...criteriaFieldMeta } : undefined,
         isEnabled: row?.isEnabled ?? true,
         defaultEvaluatorId: row?.defaultEvaluatorId,
       };

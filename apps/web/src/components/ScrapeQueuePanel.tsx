@@ -7,7 +7,7 @@ import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 import { formatSourceCriteriaSummary } from '../lib/formatSourceCriteria.js';
 import { useWorkerTriggerUrl } from '../hooks/useWorkerTriggerUrl.js';
 import { PlusIcon } from './PlusIcon.js';
-import { SourceCriteriaFields } from './SourceCriteriaFields.js';
+import { SourceCriteriaFields, type CriteriaFieldMeta } from './SourceCriteriaFields.js';
 
 const formatDateTime = (timestamp: number): string => new Date(timestamp).toLocaleString();
 
@@ -17,6 +17,7 @@ type SourceRow = {
   source: string;
   displayName: string;
   acceptedCriteriaFields: string[];
+  criteriaFieldMeta?: Record<string, CriteriaFieldMeta>;
   isEnabled: boolean;
   defaultEvaluatorId?: Id<'job_evaluators'>;
 };
@@ -92,8 +93,12 @@ export function ScrapeQueuePanel() {
   }, [queuedRuns]);
 
   const sourceByKey = useMemo(() => new Map(sourceRows.map((row) => [row.source, row])), [sourceRows]);
-  const newSourceFields = sourceByKey.get(newSource)?.acceptedCriteriaFields ?? [];
-  const editSourceFields = sourceByKey.get(editSource)?.acceptedCriteriaFields ?? [];
+  const newSourceRow = sourceByKey.get(newSource);
+  const editSourceRow = sourceByKey.get(editSource);
+  const newSourceFields = newSourceRow?.acceptedCriteriaFields ?? [];
+  const editSourceFields = editSourceRow?.acceptedCriteriaFields ?? [];
+  const newSourceFieldMeta = newSourceRow?.criteriaFieldMeta;
+  const editSourceFieldMeta = editSourceRow?.criteriaFieldMeta;
 
   const resetEdit = () => {
     setEditingId(null);
@@ -322,6 +327,7 @@ export function ScrapeQueuePanel() {
           fields={newSourceFields}
           values={newSourceCriteria}
           onChange={setNewSourceCriteria}
+          fieldMeta={newSourceFieldMeta}
         />
       </div>
 
@@ -381,6 +387,7 @@ export function ScrapeQueuePanel() {
                           fields={editSourceFields}
                           values={editSourceCriteria}
                           onChange={setEditSourceCriteria}
+                          fieldMeta={editSourceFieldMeta}
                           variant='compact'
                         />
                       )}
