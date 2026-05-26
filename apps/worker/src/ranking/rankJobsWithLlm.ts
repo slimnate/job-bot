@@ -9,6 +9,8 @@ import {
   rankingJsonSchema,
   RANKING_SYSTEM_MESSAGE,
   validateIndividualScores,
+  parseRankingResultsFromText,
+  validateCursorRankingResults,
   validateRankingResults,
   type RankingCandidateInput,
   type RankingEvaluatorInput,
@@ -138,7 +140,7 @@ function loadCursorCliConfig(modelOverride?: string): CursorCliConfig {
   return {
     command: getSettingString('CURSOR_CLI_COMMAND').trim(),
     args: parseArgs(
-      process.env.CURSOR_CLI_ARGS ?? '--print --mode=ask --trust --output-format json'
+      process.env.CURSOR_CLI_ARGS ?? '--print --trust --output-format json'
     ),
     timeoutMs: loadRankingBaseTimeoutMs(),
     model: resolveCursorApiModelId(modelOverride),
@@ -277,6 +279,8 @@ async function callCursorCliForRankings(
 
   const args = buildCursorCliArgs(config, prompt, {
     minimalContext: isCursorMinimalContextEnabled(),
+    /** Default Agent mode (omit `--mode`) so the CLI can write results.json; ask/plan are read-only. */
+    useDefaultAgentMode: true,
   });
 
   const extraTimeout = loadCursorExtraTimeoutMs();
@@ -313,7 +317,17 @@ async function callCursorCliForRankings(
       });
     }
 
-    const fromFile = await readCursorRankingResultsFile(config.workspaceDir, batchId);
+    let fromFile = await readCursorRankingResultsFile(config.workspaceDir, batchId);
+    if (!fromFile && envelope?.result) {
+      const extracted = parseRankingResultsFromText(envelope.result);
+      fromFile = validateCursorRankingResults(extracted);
+      if (fromFile) {
+        workerLog.info('llm.rank.cursor_cli.stdout_fallback', {
+          batchId,
+          resultCount: fromFile.length,
+        });
+      }
+    }
     if (!fromFile) {
       workerLog.warn('llm.rank.cursor_cli_failed', {
         message: 'Missing or invalid results.json after Cursor CLI run.',
@@ -321,6 +335,7 @@ async function callCursorCliForRankings(
         candidateCount: candidates.length,
         batchId,
         stderr: stderr.trim() || undefined,
+        envelopeResultChars: envelope?.result?.length,
       });
       return null;
     }

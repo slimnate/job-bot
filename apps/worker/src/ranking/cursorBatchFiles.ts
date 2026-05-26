@@ -5,7 +5,7 @@ import {
   buildEvaluatorBatchPayload,
   cursorBatchPaths,
   serializeCandidateForBatchFile,
-  validateRankingResults,
+  validateCursorRankingResults,
   type CursorBatchPaths,
   type RankingCandidateInput,
   type RankingEvaluatorInput,
@@ -66,5 +66,5 @@ export async function readCursorRankingResultsFile(
     return null;
   }
 
-  return validateRankingResults(parsed);
+  return validateCursorRankingResults(parsed);
 }

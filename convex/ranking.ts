@@ -1,11 +1,13 @@
 import { mutation, query } from './_generated/server.js';
 import { v } from 'convex/values';
+import { normalizeRankingForPersist } from './rankingPersist.js';
 
 const rankingResultValidator = v.object({
   postingId: v.id('job_postings'),
   scoreOverall: v.number(),
   reasoningSummary: v.string(),
   criteriaMatch: v.any(),
+  dimensionScores: v.optional(v.any()),
   redFlags: v.optional(v.array(v.string())),
 });
 
@@ -81,6 +83,13 @@ export const upsertResults = mutation({
     const deduped = args.rankings.length - merged.size;
 
     for (const ranking of merged.values()) {
+      const normalized = normalizeRankingForPersist(ranking.criteriaMatch, ranking.dimensionScores);
+      if (!normalized) {
+        throw new Error(
+          `Invalid ranking payload for posting ${ranking.postingId}: criteriaMatch and dimensionScores must be separable rubric data.`
+        );
+      }
+
       await ctx.db.insert('job_rankings', {
         postingId: ranking.postingId,
         evaluatorId: args.evaluatorId,
@@ -88,7 +97,8 @@ export const upsertResults = mutation({
         scoreOverall: ranking.scoreOverall,
         model: args.model,
         reasoningSummary: ranking.reasoningSummary,
-        criteriaMatchJson: ranking.criteriaMatch,
+        criteriaMatchJson: normalized.criteriaMatchJson,
+        dimensionScoresJson: normalized.dimensionScoresJson,
         redFlags: ranking.redFlags,
         rankedAt,
         createdAt: now,

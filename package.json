@@ -11,6 +11,7 @@
     "dev:all": "concurrently -n convex,web,worker -c cyan,magenta,yellow \"npx convex dev\" \"npm run dev --workspace @job-bot/web\" \"WORKER_HTTP_TRIGGER_PORT=3999 WORKER_USE_CHROME=1 WORKER_CHROME_HEADLESS=0 npm run dev --workspace @job-bot/worker\"",
     "trigger:linkedin": "node --env-file=.env.local scripts/trigger-linkedin-run.mjs",
     "populate:ranking-catalog": "node --env-file=.env.local scripts/populate-ranking-llm-catalog.mjs",
+    "backfill:ranking-dimensions": "npx convex run rankingMigrate:startBackfill",
     "test:worker": "npm run test --workspace=@job-bot/worker"
   },
   "devDependencies": {

@@ -11,6 +11,16 @@ const candidate = {
   url: 'https://example.com',
 };
 
+const fullDimensionScores = {
+  technicalFit: 20,
+  levelRealism: 15,
+  workStyleScope: 10,
+  compensationTransparency: 8,
+  locationLogistics: 8,
+  missionResonance: 3,
+  processRedFlags: 12,
+};
+
 describe('validateIndividualScores', () => {
   it('accepts one score per candidate', () => {
     const result = validateIndividualScores([candidate], [
@@ -18,7 +28,8 @@ describe('validateIndividualScores', () => {
         postingId: 'a',
         scoreOverall: 80,
         reasoningSummary: 'Good fit',
-        criteriaMatch: {},
+        criteriaMatch: { matched: ['TypeScript'], unmet: [] },
+        dimensionScores: fullDimensionScores,
         redFlags: [],
       },
     ]);

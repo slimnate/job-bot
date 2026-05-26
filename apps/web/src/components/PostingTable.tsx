@@ -326,8 +326,8 @@ function RankingDetails({ ranking }: RankingDetailsProps) {
   return (
     <div className='posting-item__ranking'>
       <ReasoningScoreTable reasoningSummary={ranking.reasoningSummary} />
-      <CollapsibleBadgeRow label='Green flags' items={matchedItems} badgeClass='matched' />
-      <CollapsibleBadgeRow label='Yellow flags' items={unmetItems} badgeClass='unmet' />
+      <CollapsibleBadgeRow label='matched' items={matchedItems} badgeClass='matched' />
+      <CollapsibleBadgeRow label='unmet' items={unmetItems} badgeClass='unmet' />
       <CollapsibleBadgeRow label='Red flags' items={redFlagItems} badgeClass='red' />
       <p className='posting-item__model-line'>
         <span className='posting-item__model-label'>Model</span> {ranking.model}

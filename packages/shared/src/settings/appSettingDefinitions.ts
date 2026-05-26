@@ -326,7 +326,7 @@ export const APP_SETTING_DEFINITIONS: readonly AppSettingDefinition[] = [
     key: 'LLM_RANKING_CURSOR_MINIMAL_CONTEXT',
     label: 'Cursor minimal CLI context',
     hint:
-      'When enabled (default), forces --mode=ask, --trust, and --workspace on the Cursor CLI invocation. Set to off only if you need full agent context from the repo. LLM_RANKING_CURSOR_MINIMAL_CONTEXT=0 in env overrides a saved “on” value.',
+      'When enabled (default), forces --trust and --workspace on the Cursor CLI invocation. Batch ranking omits --mode so Cursor uses default Agent mode (file writes). Set to off only if you need full agent context from the repo. LLM_RANKING_CURSOR_MINIMAL_CONTEXT=0 in env overrides a saved “on” value.',
     type: 'boolean',
     section: 'cursor_cli',
   }),

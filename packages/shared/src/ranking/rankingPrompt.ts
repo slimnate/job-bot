@@ -126,8 +126,9 @@ export function buildRankingPrompt(
     '- Return one object per input posting, with no omissions and no extras.',
     '- Use the exact postingId values from input.',
     '- scoreOverall is 0..100 (higher is a better fit for this candidate).',
-    '- reasoningSummary is concise and specific.',
-    '- criteriaMatch is an object describing matched and unmet criteria.',
+    '- reasoningSummary is concise and specific (include the rubric score table per evaluator instructions).',
+    '- criteriaMatch has only matched and unmet: string arrays of short criteria bullets (green/yellow flags). Do not put numeric rubric scores in criteriaMatch.',
+    '- dimensionScores has exactly these numeric keys (rubric points earned per dimension): technicalFit (0-25), levelRealism (0-20), workStyleScope (0-15), compensationTransparency (0-10), locationLogistics (0-10), missionResonance (0-5), processRedFlags (0-15).',
     '- redFlags is an array of strings and can be empty.',
     '',
   ];

@@ -110,6 +110,26 @@ export function hasCliArgFlag(args: string[], flag: string): boolean {
 }
 
 /**
+ * Removes `--mode` / `--mode=value` so Cursor uses default Agent mode (can write files).
+ * Per Cursor CLI docs, `--mode` only accepts `plan` or `ask`; Agent is the default when omitted.
+ */
+export function stripCliModeArgs(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (arg === '--mode') {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--mode=')) {
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
+/**
  * Forces `--output-format json` for ranking (removes text/stream-json output-format flags).
  */
 export function enforceRankingJsonOutputFormat(args: string[]): string[] {
@@ -133,16 +153,24 @@ export function enforceRankingJsonOutputFormat(args: string[]): string[] {
 
 /**
  * Builds argv for `cursor-agent`, avoiding duplicate flags when `CURSOR_CLI_ARGS` uses `--mode=ask` style.
+ *
+ * @param useDefaultAgentMode - When true, strips `--mode` so the CLI runs in default Agent mode
+ *   (read/write tools). Use for batch-file ranking that must write `results.json`.
  */
 export function buildCursorCliArgs(
   config: CursorCliConfig,
   prompt: string,
-  options: { minimalContext?: boolean } = {}
+  options: { minimalContext?: boolean; useDefaultAgentMode?: boolean } = {}
 ): string[] {
   let args = enforceRankingJsonOutputFormat([...config.args]);
   const minimal = options.minimalContext ?? true;
+  const useDefaultAgentMode = options.useDefaultAgentMode ?? false;
 
   if (minimal) {
+    if (useDefaultAgentMode) {
+      args = stripCliModeArgs(args);
+    }
+
     const ensureFlag = (flag: string, value?: string) => {
       if (hasCliArgFlag(args, flag)) {
         return;
@@ -154,7 +182,9 @@ export function buildCursorCliArgs(
       }
     };
 
-    ensureFlag('--mode', 'ask');
+    if (!useDefaultAgentMode) {
+      ensureFlag('--mode', 'ask');
+    }
     ensureFlag('--trust');
     ensureFlag('--workspace', config.workspaceDir);
     if (!hasCliArgFlag(args, '--print') && !args.includes('-p')) {

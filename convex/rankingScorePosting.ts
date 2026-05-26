@@ -290,6 +290,7 @@ export const scoreOnePosting = action({
           scoreOverall: row.scoreOverall,
           reasoningSummary: row.reasoningSummary,
           criteriaMatch: row.criteriaMatch,
+          dimensionScores: row.dimensionScores,
           redFlags: row.redFlags,
         },
       ],
@@ -371,6 +372,7 @@ export const scorePostingsBatch = action({
         scoreOverall: row.scoreOverall,
         reasoningSummary: row.reasoningSummary,
         criteriaMatch: row.criteriaMatch,
+        dimensionScores: row.dimensionScores,
         redFlags: row.redFlags,
       })),
     });

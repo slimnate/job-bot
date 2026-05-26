@@ -196,23 +196,4 @@ export function parseReasoningScoreTable(markdown: string): ParsedReasoningScore
   return { rows, remainderMarkdown };
 }
 
-/** Rubric dimension keys stored redundantly in criteriaMatchJson. */
-export const CRITERIA_DIMENSION_SCORE_KEYS = new Set([
-  'compensation',
-  'hiringProcess',
-  'location',
-  'mission',
-  'roleLevel',
-  'technicalFit',
-  'workStyle',
-]);
-
-/**
- * Whether a criteriaMatchJson entry is a redundant numeric dimension score.
- */
-export function isDimensionScoreEntry(key: string, value: unknown): boolean {
-  if (CRITERIA_DIMENSION_SCORE_KEYS.has(key)) {
-    return true;
-  }
-  return typeof value === 'number' && !Number.isNaN(value);
-}
+export { isDimensionScoreEntry, RANKING_DIMENSION_KEYS } from '@job-bot/shared';

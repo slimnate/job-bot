@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildCursorCliArgs,
+  stripCliModeArgs,
   createCursorCliLineBuffer,
   drainCursorCliLines,
   effectiveRankingModelOverride,
@@ -51,6 +52,33 @@ describe('cursorCli', () => {
     assert.equal(envelope?.is_error, false);
   });
 
+  it('stripCliModeArgs removes mode flags for default Agent mode', () => {
+    assert.deepEqual(stripCliModeArgs(['--print', '--mode', 'ask', '--trust']), [
+      '--print',
+      '--trust',
+    ]);
+    assert.deepEqual(stripCliModeArgs(['--mode=ask', '--trust']), ['--trust']);
+  });
+
+  it('buildCursorCliArgs omits --mode when useDefaultAgentMode', () => {
+    const args = buildCursorCliArgs(
+      {
+        command: 'cursor-agent',
+        args: ['--print', '--mode=ask', '--trust', '--output-format', 'json'],
+        timeoutMs: 60_000,
+        model: 'auto',
+        workspaceDir: '/tmp/ws',
+      },
+      'hello',
+      { minimalContext: true, useDefaultAgentMode: true }
+    );
+    assert.equal(
+      args.filter((a) => a === '--mode' || a.startsWith('--mode=')).length,
+      0
+    );
+    assert.equal(args[args.length - 1], 'hello');
+  });
+
   it('buildCursorCliArgs does not duplicate --mode when already --mode=ask', () => {
     const args = buildCursorCliArgs(
       {
@@ -65,6 +93,7 @@ describe('cursorCli', () => {
     );
     const modeCount = args.filter((a) => a === '--mode' || a.startsWith('--mode=')).length;
     assert.equal(modeCount, 1);
+    assert.ok(args.includes('--mode=ask') || (args.includes('--mode') && args[args.indexOf('--mode') + 1] === 'ask'));
     assert.equal(args[args.length - 1], 'hello');
     assert.ok(args.includes('--model'));
     assert.equal(args[args.indexOf('--model') + 1], 'auto');

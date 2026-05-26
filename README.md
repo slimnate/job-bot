@@ -9,7 +9,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 - Postings viewer (`apps/web/src/components/PostingViewer.tsx`) with:
   - humanized discovered timestamps (same-day time, older relative age)
   - **sticky toolbar** (below the nav): search, source, **rank status** (all / ranked only / unranked only), min score, sort, **Select all visible**, bulk **Score selected** / **Delete selected** — stays visible while scrolling the list
-  - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), description preview with **Show full description** / **Show less**, and ranking details: **compact rubric score table** (criteria + score, expandable to full details column), **green / yellow / red flag** rows (one line + “N more”), model label (no redundant per-dimension scores from `criteriaMatchJson`)
+  - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), description preview with **Show full description** / **Show less**, and ranking details: **compact rubric score table** from `reasoningSummary`, **matched / unmet / red flag** rows from `criteriaMatchJson` / `redFlags`, model label
   - filters: `postings.list` supports `rankStatus` (`ranked` | `unranked`) in addition to text search, source, `minScore`, and sort (`scoreDesc`, `rankedAtDesc`, `discoveredAtDesc`, `postedAtDesc`; unranked rows sort last when sorting by rank date)
   - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes (larger click targets), bulk `Score selected` / `Delete selected`, and `Clear All`
   - bulk score uses **fixed-size chunks** (default **3 postings** per LLM/CLI request); global rank is merged by `scoreOverall` after all chunks succeed
@@ -218,10 +218,10 @@ Stored postings include `rawPayload.extractionDiagnostics` (`salarySource`, `has
 - `LLM_RANKING_CURSOR_KEEP_BATCH_FILES` (default: `0`; set `1` to leave batch dirs on disk for debugging)
 - `LLM_RANKING_CURSOR_EXTRA_TIMEOUT_MS` (extra timeout for Cursor workspace file ranking, default: `90000`; legacy env `LLM_RANKING_CURSOR_FILE_EXTRA_TIMEOUT_MS` still accepted)
 - `LLM_RANKING_CURSOR_CHUNK_SIZE` (max postings per Cursor CLI call, default: `12`; set `0` to disable chunking)
-- `LLM_RANKING_CURSOR_MINIMAL_CONTEXT` (default: `1`; set `0` to skip forced `--mode=ask`, `--trust`, `--workspace`)
+- `LLM_RANKING_CURSOR_MINIMAL_CONTEXT` (default: `1`; set `0` to skip forced `--trust` / `--workspace`. Batch ranking omits `--mode` so the CLI uses default **Agent** mode and can write `results.json`; only `plan` and `ask` are valid `--mode` values.)
 - `LLM_RANKING_CURSOR_LOG_OUTPUT` (default: `1`; set `0` to disable streaming `llm.rank.cursor_cli.output` debug logs for each `cursor-agent` stdout/stderr line)
 - `CURSOR_CLI_COMMAND` (default: `cursor-agent`)
-- `CURSOR_CLI_ARGS` (default: `--print --mode=ask --trust --output-format json`; ranking always forces `--output-format json`. Scores are read from `results.json` in the batch directory, not from stdout.)
+- `CURSOR_CLI_ARGS` (default: `--print --trust --output-format json`; do not pass `--mode=ask` for batch ranking — Ask is read-only. Omit `--mode` for Agent (default). Ranking forces `--output-format json` and strips `--mode` on batch runs. Scores are read from `results.json`, with stdout JSON fallback if needed.)
 - `CURSOR_CLI_WORKSPACE` (default: `apps/worker/ranking-cli-workspace` — resolved to an absolute path from the repo root before invoking `cursor-agent`, so worker cwd does not break the path; empty dir so repo `AGENTS.md` / `.cursor/rules` are not loaded)
 
 LinkedIn automation may conflict with LinkedIn’s terms; only use credentials and tooling you are allowed to use.
@@ -239,6 +239,20 @@ For `http` provider mode:
 **Ranking vs saving:** The worker runs `cursor-agent` first, then calls Convex **`ranking.upsertResults`**. If you see **`llm.rank.success`** followed by **`rank_posting.save_failed`** or **`fetch failed`** on `ranking.upsertResults`, the model output was parsed correctly but the worker could not reach your deployment — confirm **`CONVEX_URL`** in `.env.local`, keep **`npx convex dev`** running, and check network/DNS to `*.convex.cloud`. The Postings UI will show the computed score with a save error when that happens.
 
 **Schema note:** `job_rankings` no longer stores `rank`. After deploying the schema change in dev, clear stale rows (Postings **Clear All**, or `postings.clearAll`) so old documents with `rank` do not linger.
+
+**Ranking fields (`job_rankings`):**
+
+- `criteriaMatchJson` — `{ matched: string[], unmet: string[] }` for matched/unmet UI badges (not numeric rubric scores).
+- `dimensionScoresJson` — canonical rubric keys: `technicalFit`, `levelRealism`, `workStyleScope`, `compensationTransparency`, `locationLogistics`, `missionResonance`, `processRedFlags` (aliases like `roleLevel` / `compensation` are normalized on save).
+- `reasoningSummary` — markdown rubric table shown in the postings list (unchanged).
+
+After pulling ranking schema changes, run a one-time backfill to move legacy numeric keys out of `criteriaMatchJson`:
+
+```bash
+npm run backfill:ranking-dimensions
+```
+
+Re-score postings if you want matched/unmet badges on rows that previously stored only dimension numbers (backfill leaves `matched` / `unmet` empty when they were missing).
 
 ### 3) Run Convex
 

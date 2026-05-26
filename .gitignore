@@ -3,6 +3,7 @@ dist
 job-bot-worker.log
 coverage
 ex
+apps/worker/ranking-cli-workspace
 
 .DS_Store
 .env

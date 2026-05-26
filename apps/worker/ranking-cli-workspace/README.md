@@ -15,7 +15,7 @@ Each scoring run writes under `.ranking-batches/{batchId}/`:
   results.json     # written by the agent — score array (worker reads this after CLI exits)
 ```
 
-The worker sends a short prompt that tells the agent to read `evaluator.json` and `postings.json`, then **write scores to `results.json`**. Rankings are **not** parsed from CLI stdout (stdout uses `--output-format json` for completion metadata only). Stdout/stderr lines are still logged when `LLM_RANKING_CURSOR_LOG_OUTPUT=1`.
+The worker sends a short prompt that tells the agent to read `evaluator.json` and `postings.json`, then **write scores to `results.json`**. The CLI is invoked **without `--mode`** so Cursor uses default **Agent** mode (read/write tools). `--mode=ask` and `--mode=plan` are read-only and cannot write the results file. If the file is missing or uses a legacy shape, the worker also tries to parse JSON from the CLI result text. Stdout/stderr lines are still logged when `LLM_RANKING_CURSOR_LOG_OUTPUT=1`.
 
 Large selections are split into multiple CLI runs when `LLM_RANKING_CURSOR_CHUNK_SIZE` is set (default `12`).
 

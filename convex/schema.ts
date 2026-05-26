@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { dimensionScoresPartialValidator } from './rankingValidators.js';
 
 export const schemaVersion = 'worker_settings_env';
 
@@ -101,7 +102,14 @@ export default defineSchema({
     scoreOverall: v.number(),
     model: v.string(),
     reasoningSummary: v.string(),
+    /**
+     * Green/yellow badge bullets (`matched` / `unmet` string arrays).
+     * Stored as `v.any()` so legacy rows with numeric rubric keys can deploy until backfill runs.
+     * New writes are normalized to `criteriaMatchValidator` in `ranking.upsertResults`.
+     */
     criteriaMatchJson: v.any(),
+    /** Canonical rubric dimension scores (see `rankingValidators.ts`). */
+    dimensionScoresJson: v.optional(dimensionScoresPartialValidator),
     redFlags: v.optional(v.array(v.string())),
     rankedAt: v.number(),
     createdAt: v.number(),
