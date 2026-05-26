@@ -1163,6 +1163,7 @@ label.posting-list-select-all input {
 
 .posting-item__score-table-wrap {
   margin-bottom: 0.35rem;
+  overflow-x: auto;
 }
 
 .posting-score-table-scroll {
@@ -1185,12 +1186,15 @@ label.posting-list-select-all input {
   vertical-align: top;
 }
 
-.posting-score-table th {
+.posting-score-table th,
+.posting-score-table--expanded .posting-score-table__criteria {
   color: #9ca3af;
   background: rgba(30, 41, 59, 0.45);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .posting-score-table td {
@@ -1209,15 +1213,11 @@ label.posting-list-select-all input {
 }
 
 .posting-score-table--compact th {
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
   text-align: center;
 }
 
-.posting-score-table--compact td {
+.posting-score-table--compact td,
+.posting-score-table--expanded .posting-score-table__score {
   text-align: center;
   font-weight: 600;
   white-space: nowrap;
@@ -1262,15 +1262,6 @@ label.posting-list-select-all input {
   min-width: 0;
 }
 
-.posting-flag-row__label {
-  flex-shrink: 0;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: #9ca3af;
-  min-width: 4.5rem;
-}
-
 .posting-flag-row__badges {
   display: flex;
   flex: 1;
@@ -1280,8 +1271,7 @@ label.posting-list-select-all input {
 }
 
 .posting-flag-row--collapsed .posting-flag-row__badges {
-  flex-wrap: nowrap;
-  overflow: hidden;
+  flex-wrap: wrap;
 }
 
 .posting-flag-row--collapsed .posting-item__criteria-badge {

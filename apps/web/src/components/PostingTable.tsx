@@ -138,19 +138,16 @@ function ReasoningScoreTable({ reasoningSummary }: ReasoningScoreTableProps) {
 
   return (
     <div className='posting-item__score-table-wrap'>
-      <table className='posting-score-table posting-score-table--expanded'>
-        <thead>
-          <tr>
-            <th scope='col'>Criteria</th>
-            <th scope='col'>Score</th>
-            <th scope='col'>Details</th>
-          </tr>
-        </thead>
+      <table className='posting-score-table posting-score-table--expanded' aria-label='Scoring breakdown'>
         <tbody>
           {rows.map((row, index) => (
             <tr key={`${row.name}-${index}`}>
-              <td>{row.name}</td>
-              <td className={getScoreColorClass(scoreCellToPercent(row.score))}>{row.score}</td>
+              <td className='posting-score-table__criteria'>{row.name}</td>
+              <td
+                className={`posting-score-table__score ${getScoreColorClass(scoreCellToPercent(row.score))}`}
+              >
+                {row.score}
+              </td>
               <td>{row.details ?? '—'}</td>
             </tr>
           ))}
@@ -166,28 +163,31 @@ function ReasoningScoreTable({ reasoningSummary }: ReasoningScoreTableProps) {
   );
 }
 
+/** Max flag pills shown before the “N more” expand control. */
+const FLAG_ROW_VISIBLE_COUNT = 3;
+
 type CollapsibleBadgeRowProps = {
-  label: string;
+  /** Screen-reader label only (green / yellow / red flags). */
+  ariaLabel: string;
   items: string[];
   badgeClass: string;
 };
 
-function CollapsibleBadgeRow({ label, items, badgeClass }: CollapsibleBadgeRowProps) {
+function CollapsibleBadgeRow({ ariaLabel, items, badgeClass }: CollapsibleBadgeRowProps) {
   const [expanded, setExpanded] = useState(false);
 
   if (items.length === 0) {
     return null;
   }
 
-  const hiddenCount = expanded ? 0 : Math.max(0, items.length - 1);
-  const visibleItems = expanded ? items : items.slice(0, 1);
+  const hiddenCount = expanded ? 0 : Math.max(0, items.length - FLAG_ROW_VISIBLE_COUNT);
+  const visibleItems = expanded ? items : items.slice(0, FLAG_ROW_VISIBLE_COUNT);
 
   return (
     <div
       className={`posting-flag-row ${expanded ? 'posting-flag-row--expanded' : 'posting-flag-row--collapsed'}`}
-      aria-label={label}
+      aria-label={ariaLabel}
     >
-      <span className='posting-flag-row__label'>{label}</span>
       <span className='posting-flag-row__badges'>
         {visibleItems.map((item, index) => (
           <span
@@ -208,7 +208,7 @@ function CollapsibleBadgeRow({ label, items, badgeClass }: CollapsibleBadgeRowPr
             {hiddenCount} more
           </button>
         ) : null}
-        {expanded && items.length > 1 ? (
+        {expanded && items.length > FLAG_ROW_VISIBLE_COUNT ? (
           <button
             type='button'
             className='posting-flag-row__more posting-item__criteria-badge'
@@ -282,9 +282,9 @@ function RankingDetails({ postingId, ranking }: RankingDetailsProps) {
       >
         {scoringExpanded ? 'Hide full scoring table' : 'Show full scoring table'}
       </button>
-      <CollapsibleBadgeRow label='Green flags' items={matchedItems} badgeClass='matched' />
-      <CollapsibleBadgeRow label='Yellow flags' items={unmetItems} badgeClass='unmet' />
-      <CollapsibleBadgeRow label='Red flags' items={redFlagItems} badgeClass='red' />
+      <CollapsibleBadgeRow ariaLabel='Green flags' items={matchedItems} badgeClass='matched' />
+      <CollapsibleBadgeRow ariaLabel='Yellow flags' items={unmetItems} badgeClass='unmet' />
+      <CollapsibleBadgeRow ariaLabel='Red flags' items={redFlagItems} badgeClass='red' />
     </div>
   );
 }
