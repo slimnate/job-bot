@@ -1198,8 +1198,14 @@ label.posting-list-select-all input {
 }
 
 .posting-score-table--compact {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.posting-score-table--compact th,
+.posting-score-table--compact td {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .posting-score-table--compact th {
@@ -1208,9 +1214,7 @@ label.posting-list-select-all input {
   text-transform: uppercase;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  max-width: 8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .posting-score-table--compact td {
