@@ -9,6 +9,7 @@ import {
 export const SETTINGS_SECTION_SLUG: Record<AppSettingSection, string> = {
   scheduler: 'scheduler',
   linkedin: 'linkedin',
+  remotive: 'remotive',
   ranking: 'ranking',
   http_openai: 'http-openai',
   cursor_cli: 'cursor-cli',

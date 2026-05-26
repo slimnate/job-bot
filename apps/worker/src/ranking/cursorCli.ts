@@ -10,6 +10,9 @@ const CURSOR_MODEL_ALIASES: Record<string, string> = {
   'composer-1': 'composer-2.5',
 };
 
+/** Placeholder from `ranking.recompute` when no model is chosen; use worker settings instead. */
+const RANKING_MODEL_PLACEHOLDERS = new Set(['llm-default', '']);
+
 export type CursorCliConfig = {
   command: string;
   args: string[];
@@ -76,9 +79,21 @@ export function flushCursorCliLineBuffer(buffer: CursorCliLineBuffer): string | 
 /**
  * Resolves the Cursor CLI model id (aliases invalid catalog seeds; default `auto`).
  */
+/**
+ * Returns a settings/env model override, or undefined when the caller passed a placeholder.
+ */
+export function effectiveRankingModelOverride(modelOverride?: string): string | undefined {
+  const trimmed = modelOverride?.trim();
+  if (!trimmed || RANKING_MODEL_PLACEHOLDERS.has(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 export function resolveCursorApiModelId(modelOverride?: string): string {
   const fromSettings = loadCursorDefaultModel().trim();
-  const raw = (modelOverride?.trim() || fromSettings).trim();
+  const override = effectiveRankingModelOverride(modelOverride);
+  const raw = (override ?? fromSettings).trim();
   if (!raw) {
     throw new Error(
       'LLM_RANKING_CURSOR_MODEL is empty; set it in Settings or LLM_RANKING_CURSOR_MODEL env.'

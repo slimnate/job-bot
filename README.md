@@ -18,11 +18,12 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - status color coding (`queued` blue, `running` yellow, `succeeded` green, `failed`/`cancelled` red)
   - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
   - log detail modal with table-first view, **per-level filters** (debug / info / warn / error), and raw JSON
-- Settings (`/settings`, sidebar layout in `apps/web/src/pages/SettingsLayout.tsx`): **Overview** plus section routes (`/settings/scheduler`, `/settings/linkedin`, `/settings/ranking`, `/settings/http-openai`, `/settings/cursor-cli`, `/settings/web`, `/settings/advanced`). Worker, LinkedIn, ranking, HTTP/OpenAI (non-secret), Cursor CLI, and web↔worker options stored in Convex `app_settings`; each field has always-visible hint text (catalog in `packages/shared/src/settings/appSettingDefinitions.ts`). Non-empty env vars override saved values; the worker refreshes settings about every 30 seconds. Draft edits persist across section navigation until you save.
+- Settings (`/settings`, sidebar layout in `apps/web/src/pages/SettingsLayout.tsx`): **Overview** plus section routes (`/settings/scheduler`, `/settings/linkedin`, `/settings/remotive`, `/settings/ranking`, `/settings/http-openai`, `/settings/cursor-cli`, `/settings/web`, `/settings/advanced`). Worker, LinkedIn, Remotive, ranking, HTTP/OpenAI (non-secret), Cursor CLI, and web↔worker options stored in Convex `app_settings`; each field has always-visible hint text (catalog in `packages/shared/src/settings/appSettingDefinitions.ts`). Non-empty env vars override saved values; the worker refreshes settings about every 30 seconds. Draft edits persist across section navigation until you save.
 - Sources (`/sources`, `apps/web/src/components/SourcesManager.tsx`) with:
   - source **Enabled** on/off toggle (disabled sources are omitted from the queue source picker)
   - read-only accepted criteria fields (code-defined contracts)
-  - source preset management — **Add preset** opens the criteria form; **Edit** / **Duplicate** open it prefilled; create, edit, duplicate, and delete reusable criteria combinations per source
+  - source preset management for **LinkedIn** — **Add preset** opens the criteria form; **Edit** / **Duplicate** open it prefilled; create, edit, duplicate, and delete reusable criteria combinations
+  - **Remotive** has no presets; use category checkboxes on the Workers queue instead
 - Convex backend with schema + APIs for:
   - Evaluator management (`convex/evaluators.ts`)
   - Source management (`convex/sources.ts`)
@@ -37,7 +38,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - Cron-like scheduler (`apps/worker/src/scheduler.ts`)
   - In-memory bounded queue abstraction (`apps/worker/src/queue.ts`)
   - Run orchestration pipeline (`apps/worker/src/orchestrator.ts`)
-  - Deterministic source adapter placeholder (`apps/worker/src/sourceAdapters.ts`)
+  - Source adapters (`apps/worker/src/sourceAdapters.ts`): **LinkedIn** (Chrome/CDP) and **Remotive** (public RSS feeds)
 - Shared package and agent-core placeholders:
   - Ranking type in `packages/shared/src/schemas/ranking.ts`
   - Agent core stub in `packages/agent-core/src/index.ts`
@@ -48,7 +49,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 2. Runs are queued either:
    - manually from the dashboard (`runs.trigger`), optionally with an explicit `source`, `sourceCriteria`, and `evaluatorId`.
 3. Worker dequeues runs with bounded concurrency.
-4. Worker collects postings for a source (**LinkedIn implemented**; unsupported sources fail fast to avoid placeholder data pollution). For LinkedIn, the worker opens `/jobs/`, waits for a signed-in jobs UI (optional `LINKEDIN_USER` / `LINKEDIN_PASS` auto-login, or sign in manually in the Chrome window). When `sourceCriteria.search` is set, it runs a **UI-only** search on `/jobs/`: the SDUI typeahead (`input[data-testid="typeahead-input"][componentkey="jobSearchBox"]`, placeholder “Describe the job you want”) receives `"<search> in <location>"` when location is also set, or just the search term when location is omitted (LinkedIn then uses your profile’s default location). Submit is Enter or a Search button. With empty `search`, the preferences hub path runs (“Show all”); `location` without `search` is ignored. It does not navigate to `/jobs/search/?location=…` or `geoId=…` URLs. With empty criteria it uses the preferences hub (“Show all”). The listing/detail scraper expands “About the job” when possible and persists the **full** job description with line breaks (bounded by a large storage cap) in `job_postings.descriptionSnippet`. LinkedIn scrape cleanup tears down Chrome after each run by default (`WORKER_AUTO_CLEANUP_CHROME=1`).
+4. Worker collects postings for a source (**LinkedIn** and **Remotive** implemented; other sources fail fast). **LinkedIn:** opens `/jobs/`, waits for a signed-in jobs UI (optional `LINKEDIN_USER` / `LINKEDIN_PASS` auto-login, or sign in manually in the Chrome window). When `sourceCriteria.search` is set, it runs a **UI-only** search on `/jobs/`: the SDUI typeahead receives `"<search> in <location>"` when location is also set, or just the search term when location is omitted. With empty `search`, the preferences hub path runs (“Show all”); `location` without `search` is ignored. The listing/detail scraper expands “About the job” when possible and persists the **full** job description with line breaks in `job_postings.descriptionSnippet`. LinkedIn scrape cleanup tears down Chrome after each run by default (`WORKER_AUTO_CLEANUP_CHROME=1`). **Remotive:** fetches public RSS feeds over HTTP (`https://remotive.com/remote-jobs/feed` when no categories are selected, or one feed per selected category slug). Queue criteria use comma-separated category slugs from the [Remotive category list](https://remotive.com/remote-jobs/rss-feed) (see `packages/shared/src/sources/remotiveCategories.ts`). Respect [Remotive’s RSS terms](https://remotive.com/remote-jobs/rss-feed): link back to listing URLs and mention Remotive as the source; do not repost to third-party job aggregators. Settings → **Remotive scraping**: `WORKER_REMOTIVE_MAX_POSTINGS` (optional cap) and `WORKER_REMOTIVE_FETCH_TIMEOUT_MS` (per-feed timeout; env overrides).
 5. Worker upserts postings in Convex (`postings.upsertBatch`).
 6. Worker scores postings with the LLM: **Cursor** = one CLI call per run (batch files under `ranking-cli-workspace/.ranking-batches/`); **HTTP** = one API call per posting. Uses the **run’s** `evaluatorId` when set, otherwise **`job_sources.defaultEvaluatorId`** for that source (Sources page), otherwise **`WORKER_DEFAULT_EVALUATOR_ID`** on that worker process. Each posting gets an independent `scoreOverall` (no global rank). Results are persisted via `ranking.upsertResults` unless disabled with `WORKER_ENABLE_LLM_RANKING=0` during testing.
 7. Worker marks run status and stats (`runs.updateStatus`).
@@ -71,7 +72,7 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `job_sources`: source enablement metadata (`source`, `displayName`, `isEnabled`, optional `defaultEvaluatorId` for ranking when a run has no evaluator)
 - `source_presets`: reusable source criteria combinations (`source`, `name`, `sourceCriteria`)
 - `scrape_runs`: run status, timing, logs summary, aggregate stats
-- `scrape_runs.sourceCriteria`: source-specific run criteria payload (LinkedIn: optional `search`; optional `location` only when `search` is set)
+- `scrape_runs.sourceCriteria`: source-specific run criteria payload (LinkedIn: optional `search`; optional `location` only when `search` is set; Remotive: optional comma-separated `categories` slugs — empty → all-jobs feed)
 - `scrape_runs.linkedinSearchStrategy`: records LinkedIn search path (`ui` for criteria-driven search, `preferences_hub` when criteria are empty; legacy runs may still show `search_url` / `url_fallback`)
 - `scrape_runs.usedLinkedinUrlFallback`: boolean warning flag for URL fallback usage
 - `scrape_runs.linkedinFallbackReason`: structured reason when fallback is used

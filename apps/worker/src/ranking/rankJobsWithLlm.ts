@@ -38,12 +38,14 @@ import {
 import { writeCursorRankingBatchFiles } from './cursorBatchFiles.js';
 import {
   buildCursorCliArgs,
+  effectiveRankingModelOverride,
   formatCursorCliFailure,
   resolveCursorApiModelId,
   runCursorCli,
   type CursorCliConfig,
   type CursorCliOutputLineHandler,
 } from './cursorCli.js';
+import { resolveCursorCliWorkspaceDir } from '../workerPaths.js';
 
 /**
  * Logs each `cursor-agent` stdout/stderr line when `LLM_RANKING_CURSOR_LOG_OUTPUT` is enabled.
@@ -111,15 +113,17 @@ function resolveProvider(): RankingProviderKind {
 
 function loadLlmConfig(modelOverride?: string): LlmClientConfig {
   const temperature = getSettingNumber('LLM_RANKING_TEMPERATURE');
+  const effectiveModel = effectiveRankingModelOverride(modelOverride);
   return {
     apiKey: requiredEnv('OPENAI_API_KEY'),
     baseUrl: getSettingString('LLM_API_BASE_URL'),
-    model: modelOverride ?? getSettingString('LLM_RANKING_MODEL'),
+    model: effectiveModel ?? getSettingString('LLM_RANKING_MODEL'),
     temperature,
   };
 }
 
 function loadCursorCliConfig(modelOverride?: string): CursorCliConfig {
+  const workspaceRaw = getSettingString('CURSOR_CLI_WORKSPACE').trim();
   return {
     command: getSettingString('CURSOR_CLI_COMMAND').trim(),
     args: parseArgs(
@@ -127,7 +131,7 @@ function loadCursorCliConfig(modelOverride?: string): CursorCliConfig {
     ),
     timeoutMs: loadRankingBaseTimeoutMs(),
     model: resolveCursorApiModelId(modelOverride),
-    workspaceDir: getSettingString('CURSOR_CLI_WORKSPACE').trim(),
+    workspaceDir: resolveCursorCliWorkspaceDir(workspaceRaw),
   };
 }
 

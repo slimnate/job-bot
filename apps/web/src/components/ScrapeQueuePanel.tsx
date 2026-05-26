@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 
+import { formatSourceCriteriaSummary } from '../lib/formatSourceCriteria.js';
 import { useWorkerTriggerUrl } from '../hooks/useWorkerTriggerUrl.js';
 import { PlusIcon } from './PlusIcon.js';
 import { SourceCriteriaFields } from './SourceCriteriaFields.js';
@@ -32,9 +33,10 @@ export function ScrapeQueuePanel() {
   );
 
   const [newSource, setNewSource] = useState('linkedin');
+  const newSourceIsRemotive = newSource === 'remotive';
   const sourcePresets = useQuery(
     api.sourcePresets.listBySource,
-    newSource ? ({ source: newSource as 'linkedin' }) : 'skip'
+    newSource && !newSourceIsRemotive ? { source: newSource } : 'skip'
   ) as SourcePresetRow[] | undefined;
   const triggerRun = useMutation(api.runs.trigger);
   const bumpQueued = useMutation(api.runs.bumpQueued);
@@ -287,32 +289,34 @@ export function ScrapeQueuePanel() {
             </button>
           </div>
         </div>
-        <label>
-          Preset (optional)
-          <select
-            value={newPresetId}
-            onChange={(event) => {
-              const presetId = event.target.value;
-              setNewPresetId(presetId);
-              const preset = (sourcePresets ?? []).find((row) => row._id === presetId);
-              if (!preset) {
-                return;
-              }
-              const next: Record<string, string> = {};
-              for (const field of newSourceFields) {
-                next[field] = preset.sourceCriteria[field] ?? '';
-              }
-              setNewSourceCriteria(next);
-            }}
-          >
-            <option value=''>No preset</option>
-            {(sourcePresets ?? []).map((preset) => (
-              <option key={preset._id} value={preset._id}>
-                {preset.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!newSourceIsRemotive ? (
+          <label>
+            Preset (optional)
+            <select
+              value={newPresetId}
+              onChange={(event) => {
+                const presetId = event.target.value;
+                setNewPresetId(presetId);
+                const preset = (sourcePresets ?? []).find((row) => row._id === presetId);
+                if (!preset) {
+                  return;
+                }
+                const next: Record<string, string> = {};
+                for (const field of newSourceFields) {
+                  next[field] = preset.sourceCriteria[field] ?? '';
+                }
+                setNewSourceCriteria(next);
+              }}
+            >
+              <option value=''>No preset</option>
+              {(sourcePresets ?? []).map((preset) => (
+                <option key={preset._id} value={preset._id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <SourceCriteriaFields
           className='queue-add-linkedin'
           fields={newSourceFields}
@@ -412,13 +416,7 @@ export function ScrapeQueuePanel() {
                 ) : (
                   <tr key={run._id}>
                     <td>{run.source}</td>
-                    <td>
-                      {Object.entries(run.sourceCriteria ?? {}).length === 0
-                        ? '—'
-                        : Object.entries(run.sourceCriteria ?? {})
-                            .map(([key, value]) => `${key}: ${value}`)
-                            .join(' | ')}
-                    </td>
+                    <td>{formatSourceCriteriaSummary(run.source, run.sourceCriteria)}</td>
                     <td>
                       {run.evaluatorId ? (
                         <>

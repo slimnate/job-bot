@@ -1,12 +1,19 @@
+import { normalizeRemotiveCategoriesCriteria } from '@job-bot/shared';
 import { v } from 'convex/values';
 
 export const LINKEDIN_SOURCE = 'linkedin';
+export const REMOTIVE_SOURCE = 'remotive';
 
 export const sourceDefinitions = {
   linkedin: {
     displayName: 'LinkedIn',
     /** Optional `search` (empty → preferences hub); optional `location` only when `search` is set. */
     acceptedCriteriaFields: ['search', 'location'],
+  },
+  remotive: {
+    displayName: 'Remotive',
+    /** Comma-separated category slugs; empty → all-jobs RSS feed. */
+    acceptedCriteriaFields: ['categories'],
   },
 } as const;
 
@@ -44,6 +51,15 @@ export function normalizeSourceCriteria(
 
   if (normalizedSource === 'linkedin' && next.location && !next.search) {
     delete next.location;
+  }
+
+  if (normalizedSource === 'remotive' && typeof sourceCriteria?.categories === 'string') {
+    const normalizedCategories = normalizeRemotiveCategoriesCriteria(sourceCriteria.categories);
+    if (normalizedCategories) {
+      next.categories = normalizedCategories;
+    } else {
+      delete next.categories;
+    }
   }
 
   return next;

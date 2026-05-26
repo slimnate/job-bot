@@ -31,9 +31,10 @@ export function SourcesManager() {
   const sources = (useQuery(api.sources.list) ?? []) as SourceRow[];
   const activeEvaluators = useQuery(api.evaluators.listActive, {});
   const [selectedSource, setSelectedSource] = useState('linkedin');
+  const isRemotive = selectedSource === 'remotive';
   const presets = useQuery(
     api.sourcePresets.listBySource,
-    selectedSource ? ({ source: selectedSource as 'linkedin' }) : 'skip'
+    selectedSource && !isRemotive ? { source: selectedSource } : 'skip'
   ) as SourcePreset[] | undefined;
 
   const setEnabled = useMutation(api.sources.setEnabled);
@@ -57,7 +58,7 @@ export function SourcesManager() {
   const onToggleSource = async (row: SourceRow) => {
     setMessage('');
     try {
-      await setEnabled({ source: row.source as 'linkedin', isEnabled: !row.isEnabled });
+      await setEnabled({ source: row.source, isEnabled: !row.isEnabled });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not update source.');
     }
@@ -109,7 +110,7 @@ export function SourcesManager() {
         setMessage('Preset updated.');
       } else {
         await createPreset({
-          source: source.source as 'linkedin',
+          source: source.source,
           name,
           sourceCriteria: draftValues,
         });
@@ -176,7 +177,8 @@ export function SourcesManager() {
       {message ? <p className='status-text'>{message}</p> : null}
       <p className='panel-subtitle tight'>
         Source criteria fields are code-managed. Use this page to enable sources, set the default
-        ranking evaluator for runs without an explicit evaluator, and manage reusable criteria presets.
+        ranking evaluator for runs without an explicit evaluator, and manage reusable criteria presets
+        (LinkedIn only; Remotive uses category selection on the queue).
       </p>
       <div className='criteria-editor-layout'>
         <aside className='criteria-profile-sidebar'>
@@ -247,91 +249,104 @@ export function SourcesManager() {
                   evaluator → this source default → <code>WORKER_DEFAULT_EVALUATOR_ID</code>.
                 </span>
               </label>
-              {presetFormMode === 'closed' ? (
-                <div className='actions'>
-                  <button type='button' className='btn-with-icon' onClick={onAddPreset}>
-                    <PlusIcon />
-                    Add preset
-                  </button>
-                </div>
+              {isRemotive ? (
+                <p className='field-hint full-width'>
+                  Remotive uses category checkboxes on the Workers queue when adding a run (not named
+                  presets on this page).
+                </p>
               ) : (
-                <div className='form-grid'>
-                  <label className='full-width'>
-                    Preset name
-                    <input
-                      value={draftName}
-                      onChange={(event) => setDraftName(event.target.value)}
-                      placeholder='e.g. React Developer in Austin, TX'
-                    />
-                  </label>
-                  <SourceCriteriaFields
-                    fields={acceptedFields}
-                    values={draftValues}
-                    onChange={setDraftValues}
-                  />
-                  {presetFormMode === 'edit' ? (
-                    <p className='field-hint full-width'>
-                      Editing preset — changes apply when you click Update preset.
-                    </p>
-                  ) : null}
-                  <div className='actions full-width'>
-                    <button type='button' onClick={() => void onSavePreset()}>
-                      {presetFormMode === 'edit' ? 'Update preset' : 'Save preset'}
-                    </button>
-                    <button type='button' onClick={resetPresetDraft}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-              <div className='table-wrapper'>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      {acceptedFields.map((field) => (
-                        <th key={field}>{field}</th>
-                      ))}
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {presets === undefined ? (
-                      <tr>
-                        <td colSpan={acceptedFields.length + 2}>Loading presets...</td>
-                      </tr>
-                    ) : presets.length === 0 ? (
-                      <tr>
-                        <td colSpan={acceptedFields.length + 2}>No presets yet.</td>
-                      </tr>
-                    ) : (
-                      presets.map((preset) => (
-                        <tr key={preset._id}>
-                          <td>{preset.name}</td>
+                <>
+                  {presetFormMode === 'closed' ? (
+                    <div className='actions'>
+                      <button type='button' className='btn-with-icon' onClick={onAddPreset}>
+                        <PlusIcon />
+                        Add preset
+                      </button>
+                    </div>
+                  ) : (
+                    <div className='form-grid'>
+                      <label className='full-width'>
+                        Preset name
+                        <input
+                          value={draftName}
+                          onChange={(event) => setDraftName(event.target.value)}
+                          placeholder='e.g. React Developer in Austin, TX'
+                        />
+                      </label>
+                      <SourceCriteriaFields
+                        fields={acceptedFields}
+                        values={draftValues}
+                        onChange={setDraftValues}
+                      />
+                      {presetFormMode === 'edit' ? (
+                        <p className='field-hint full-width'>
+                          Editing preset — changes apply when you click Update preset.
+                        </p>
+                      ) : null}
+                      <div className='actions full-width'>
+                        <button type='button' onClick={() => void onSavePreset()}>
+                          {presetFormMode === 'edit' ? 'Update preset' : 'Save preset'}
+                        </button>
+                        <button type='button' onClick={resetPresetDraft}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className='table-wrapper'>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Name</th>
                           {acceptedFields.map((field) => (
-                            <td key={`${preset._id}-${field}`}>{preset.sourceCriteria[field] ?? '-'}</td>
+                            <th key={field}>{field}</th>
                           ))}
-                          <td className='queue-actions-cell'>
-                            <button
-                              type='button'
-                              onClick={() => onEditPreset(preset)}
-                              aria-pressed={presetFormMode === 'edit' && editingPresetId === preset._id}
-                            >
-                              Edit
-                            </button>
-                            <button type='button' onClick={() => onUsePresetAsDraft(preset)}>
-                              Duplicate
-                            </button>
-                            <button type='button' onClick={() => void onDeletePreset(preset._id)}>
-                              Delete
-                            </button>
-                          </td>
+                          <th>Actions</th>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {presets === undefined ? (
+                          <tr>
+                            <td colSpan={acceptedFields.length + 2}>Loading presets...</td>
+                          </tr>
+                        ) : presets.length === 0 ? (
+                          <tr>
+                            <td colSpan={acceptedFields.length + 2}>No presets yet.</td>
+                          </tr>
+                        ) : (
+                          presets.map((preset) => (
+                            <tr key={preset._id}>
+                              <td>{preset.name}</td>
+                              {acceptedFields.map((field) => (
+                                <td key={`${preset._id}-${field}`}>
+                                  {preset.sourceCriteria[field] ?? '-'}
+                                </td>
+                              ))}
+                              <td className='queue-actions-cell'>
+                                <button
+                                  type='button'
+                                  onClick={() => onEditPreset(preset)}
+                                  aria-pressed={
+                                    presetFormMode === 'edit' && editingPresetId === preset._id
+                                  }
+                                >
+                                  Edit
+                                </button>
+                                <button type='button' onClick={() => onUsePresetAsDraft(preset)}>
+                                  Duplicate
+                                </button>
+                                <button type='button' onClick={() => void onDeletePreset(preset._id)}>
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>

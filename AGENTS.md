@@ -13,3 +13,5 @@ Always be sure to include human readable documentation in the form of function c
 Always be sure to update the README.md with relevant information any time you make code changes, when necessary for the end user or developer. Document edge cases here as well.
 
 If I referece a plan in an agent that didn't create it, make sure to update the plan steps as you implement
+
+Any time you want to add a new ENV variable, check whether it should be a user definable setting or not. If so, implement it following established settings patterns in the code. If it should be env only, document that in the README, as well as on the settings overview page.

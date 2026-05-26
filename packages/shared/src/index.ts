@@ -1,4 +1,5 @@
 export * from './settings/index.js';
+export * from './sources/remotiveCategories.js';
 export * from './schemas/ranking.js';
 export * from './ranking/rankingPrompt.js';
 export * from './ranking/rankingPromptOptions.js';

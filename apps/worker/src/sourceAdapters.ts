@@ -9,6 +9,7 @@ import { withLinkedInBrowserExclusive } from './linkedinBrowserLock.js';
 import { workerLog } from './log.js';
 import { getWorkerSettingsCache } from './settings/settingsCache.js';
 import { collectLinkedInPostings } from './sources/linkedinJobs.js';
+import { collectRemotivePostings } from './sources/remotiveJobs.js';
 import type { ScrapedPostingInput, ScrapeResult, ScrapeStats } from './scrapeTypes.js';
 
 export type { ScrapeResult, ScrapeStats } from './scrapeTypes.js';
@@ -54,11 +55,19 @@ export async function collectPostingsForSource(params: {
     });
   }
 
+  if (normalizedSource === 'remotive') {
+    return collectRemotivePostings({
+      runId: params.runId,
+      sourceCriteria: params.sourceCriteria,
+      streamPosting: params.streamPosting,
+    });
+  }
+
   /**
    * We intentionally fail fast for unsupported sources so the worker never inserts
    * synthetic placeholder rows into real postings data.
    */
   throw new Error(
-    `Unsupported scrape source '${normalizedSource}'. Only 'linkedin' is implemented in the worker source adapter.`
+    `Unsupported scrape source '${normalizedSource}'. Supported sources: linkedin, remotive.`
   );
 }

@@ -106,6 +106,14 @@ export function deriveSourceAndExternalId(url: string): { source: string; extern
   if (indeedJk?.[1]) {
     return { source: 'indeed', externalId: indeedJk[1] };
   }
+  const remotiveJob = url.match(/remotive\.com\/remote\/jobs\/[^/]+\/[^/]+-(\d+)/i);
+  if (remotiveJob?.[1]) {
+    return { source: 'remotive', externalId: remotiveJob[1] };
+  }
+  const remotiveListing = url.match(/remotive\.com\/remote-jobs\/[^/]+\/[^/]+-(\d+)/i);
+  if (remotiveListing?.[1]) {
+    return { source: 'remotive', externalId: remotiveListing[1] };
+  }
   return null;
 }
 

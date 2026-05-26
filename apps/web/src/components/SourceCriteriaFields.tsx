@@ -1,3 +1,5 @@
+import { RemotiveCategoryPicker } from './RemotiveCategoryPicker.js';
+
 type SourceCriteriaFieldsProps = {
   fields: string[];
   values: Record<string, string>;
@@ -10,8 +12,11 @@ type SourceCriteriaFieldsProps = {
 function partitionCriteriaFields(fields: string[]) {
   const search = fields.includes('search') ? (['search'] as const) : [];
   const location = fields.includes('location') ? (['location'] as const) : [];
-  const rest = fields.filter((field) => field !== 'search' && field !== 'location');
-  return { search, location, rest };
+  const categories = fields.includes('categories') ? (['categories'] as const) : [];
+  const rest = fields.filter(
+    (field) => field !== 'search' && field !== 'location' && field !== 'categories'
+  );
+  return { search, location, categories, rest };
 }
 
 /**
@@ -24,7 +29,7 @@ export function SourceCriteriaFields({
   variant = 'labeled',
   className,
 }: SourceCriteriaFieldsProps) {
-  const { search, location, rest } = partitionCriteriaFields(fields);
+  const { search, location, categories, rest } = partitionCriteriaFields(fields);
 
   const onFieldChange = (field: string, value: string) => {
     onChange({ ...values, [field]: value });
@@ -79,6 +84,15 @@ export function SourceCriteriaFields({
           {location.map((field) => renderInput(field, false))}
         </div>
       ) : null}
+      {categories.map((field) => (
+        <div key={field} className='source-criteria-field source-criteria-field-full'>
+          {variant === 'labeled' ? <span className='source-criteria-field-label'>Categories</span> : null}
+          <RemotiveCategoryPicker
+            value={values[field] ?? ''}
+            onChange={(csv) => onFieldChange(field, csv)}
+          />
+        </div>
+      ))}
       {rest.map((field) => renderInput(field, true))}
     </div>
   );

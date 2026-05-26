@@ -12,6 +12,7 @@ export { APP_SETTING_KEYS } from './systemSettingDefaults.js';
 export type AppSettingSection =
   | 'scheduler'
   | 'linkedin'
+  | 'remotive'
   | 'ranking'
   | 'http_openai'
   | 'cursor_cli'
@@ -37,6 +38,7 @@ export type AppSettingDefinition = {
 export const APP_SETTING_SECTION_ORDER: readonly AppSettingSection[] = [
   'scheduler',
   'linkedin',
+  'remotive',
   'ranking',
   'http_openai',
   'cursor_cli',
@@ -47,6 +49,7 @@ export const APP_SETTING_SECTION_ORDER: readonly AppSettingSection[] = [
 export const APP_SETTING_SECTION_LABELS: Record<AppSettingSection, string> = {
   scheduler: 'Scheduler & queue',
   linkedin: 'LinkedIn scraping',
+  remotive: 'Remotive scraping',
   ranking: 'Ranking defaults',
   http_openai: 'HTTP / OpenAI (non-secret)',
   cursor_cli: 'Cursor CLI',
@@ -60,6 +63,8 @@ export const APP_SETTING_SECTION_DESCRIPTIONS: Record<AppSettingSection, string>
     'Cron interval, queue concurrency, boot-time queue check, and whether the worker runs LLM ranking after each scrape.',
   linkedin:
     'Chrome/CDP toggles, headless mode, port, pagination limits, optional posting cap, and manual debug stepping.',
+  remotive:
+    'RSS fetch timeout and optional cap on postings collected per Remotive scrape run.',
   ranking:
     'Default evaluator when a run has none, LLM provider and models, ranking timeouts, and HTTP prompt description length.',
   http_openai:
@@ -180,6 +185,26 @@ export const APP_SETTING_DEFINITIONS: readonly AppSettingDefinition[] = [
       { value: 'coarse', label: 'Coarse' },
       { value: 'fine', label: 'Fine' },
     ],
+  }),
+  settingDef({
+    key: 'WORKER_REMOTIVE_MAX_POSTINGS',
+    label: 'Max postings per Remotive run',
+    hint:
+      'Optional cap on total Remotive postings collected in one run (across all selected category feeds, after dedupe). Leave empty for unlimited. Invalid env values are ignored with a worker warning. WORKER_REMOTIVE_MAX_POSTINGS in env overrides a saved value.',
+    type: 'number',
+    section: 'remotive',
+    min: 1,
+    optional: true,
+  }),
+  settingDef({
+    key: 'WORKER_REMOTIVE_FETCH_TIMEOUT_MS',
+    label: 'RSS fetch timeout (ms)',
+    hint:
+      'HTTP timeout when fetching each Remotive RSS feed URL (all-jobs or per category), in milliseconds. Default 30000. Applies on the next Remotive scrape after settings refresh. WORKER_REMOTIVE_FETCH_TIMEOUT_MS in env overrides this field.',
+    type: 'number',
+    section: 'remotive',
+    min: 1000,
+    max: 300000,
   }),
   settingDef({
     key: 'WORKER_DEFAULT_EVALUATOR_ID',
