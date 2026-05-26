@@ -503,7 +503,7 @@ export function PostingViewer() {
     );
 
   return (
-    <section className='panel'>
+    <section className='panel panel--postings'>
       <div className='panel-heading'>
         <div>
           <h2>Postings</h2>
@@ -604,6 +604,7 @@ export function PostingViewer() {
         emptyMessage={postingsLoading && !postings.length ? 'Loading…' : 'No postings match these filters.'}
       />
       <div className='postings-pagination' aria-label='Postings pagination'>
+        <div className='postings-pagination__inner'>
         <div className='postings-pagination__nav'>
           <button
             type='button'
@@ -642,6 +643,7 @@ export function PostingViewer() {
             ))}
           </select>
         </label>
+        </div>
       </div>
       {scoreTargets.length ? (
         <div className='modal-overlay' onClick={closeScoreDialog} role='presentation'>
