@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import type { Doc } from './_generated/dataModel.js';
 import { getLatestRankingForPosting } from './postingsListHelpers.js';
 
-export { listPage } from './postingsListPage.js';
+export { listPage, listPageCount } from './postingsListPage.js';
 
 /** Posting row returned by `list`, with the latest `job_rankings` document attached (or null). */
 type PostingWithRanking = Doc<'job_postings'> & {

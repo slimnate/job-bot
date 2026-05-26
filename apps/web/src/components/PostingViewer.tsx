@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAction, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
+import { useAction, useMutation, useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
 import type { Id } from '../../../../convex/_generated/dataModel.js';
@@ -68,6 +68,8 @@ export function PostingViewer() {
   const [scoreRankLogs, setScoreRankLogs] = useState<string[]>([]);
   const rankLogStopRef = useRef<(() => void) | null>(null);
   const rankLogEndRef = useRef<HTMLDivElement | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const pageCursorsRef = useRef<(string | null)[]>([null]);
 
   const listFilters = useMemo(
     () => ({
@@ -81,16 +83,64 @@ export function PostingViewer() {
     [postingQuery, postingSource, postingMinScore, postingSort, postingRankStatus, postingPageSize]
   );
 
-  const { results: postings, status: postingsStatus, loadMore, isLoading: postingsLoading } =
-    usePaginatedQuery(api.postings.listPage, listFilters, { initialNumItems: postingPageSize });
+  const resetPagination = () => {
+    setPageIndex(0);
+    pageCursorsRef.current = [null];
+  };
+
+  useEffect(() => {
+    resetPagination();
+  }, [listFilters]);
+
+  const pageCursor = pageCursorsRef.current[pageIndex] ?? null;
+
+  const pageResult = useQuery(api.postings.listPage, {
+    ...listFilters,
+    paginationOpts: { numItems: postingPageSize, cursor: pageCursor },
+  });
+
+  useEffect(() => {
+    if (pageResult === undefined) {
+      return;
+    }
+    if (!pageResult.isDone && pageResult.continueCursor) {
+      pageCursorsRef.current[pageIndex + 1] = pageResult.continueCursor;
+    }
+  }, [pageResult, pageIndex]);
+
+  const filteredCount = useQuery(api.postings.listPageCount, listFilters);
+
+  const postings = pageResult?.page ?? [];
+  const postingsLoading = pageResult === undefined;
+
+  const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / postingPageSize));
+  const currentPage = pageIndex + 1;
+  const canGoPrev = pageIndex > 0;
+  const canGoNext =
+    filteredCount !== undefined ? currentPage < totalPages : Boolean(pageResult && !pageResult.isDone);
 
   const onPageSizeChange = (nextSize: PageSizeOption) => {
     setPostingPageSize(nextSize);
+    resetPagination();
     try {
       localStorage.setItem(POSTINGS_PAGE_SIZE_KEY, String(nextSize));
     } catch {
       // ignore storage errors
     }
+  };
+
+  const goToPrevPage = () => {
+    if (!canGoPrev) {
+      return;
+    }
+    setPageIndex((prev) => prev - 1);
+  };
+
+  const goToNextPage = () => {
+    if (!canGoNext) {
+      return;
+    }
+    setPageIndex((prev) => prev + 1);
   };
 
   const selectedProvider = useMemo(
@@ -459,9 +509,9 @@ export function PostingViewer() {
           <h2>Postings</h2>
           {totalPostings !== undefined ? (
             <p className='panel-subtitle tight'>
-              {postingsLoading && !postings.length
-                ? 'Loading…'
-                : `Showing ${postings.length} of ${totalPostings} in database`}
+              {filteredCount !== undefined
+                ? `${filteredCount} matching · ${totalPostings} total in database`
+                : `${totalPostings} total in database`}
             </p>
           ) : null}
         </div>
@@ -512,19 +562,6 @@ export function PostingViewer() {
             <option value='discoveredAtDesc'>Discovered (newest)</option>
             <option value='postedAtDesc'>Posted (newest)</option>
           </select>
-          <label className='postings-page-size'>
-            <span className='postings-page-size__label'>Rows per page</span>
-            <select
-              value={postingPageSize}
-              onChange={(event) => onPageSizeChange(Number(event.target.value) as PageSizeOption)}
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
         <div className='posting-bulk-toolbar'>
           <label className='posting-list-select-all'>
@@ -566,16 +603,46 @@ export function PostingViewer() {
         onTogglePostingSelection={onTogglePostingSelection}
         emptyMessage={postingsLoading && !postings.length ? 'Loading…' : 'No postings match these filters.'}
       />
-      {postings.length > 0 && postingsStatus === 'CanLoadMore' ? (
-        <div className='postings-load-more'>
-          <button type='button' onClick={() => loadMore(postingPageSize)}>
-            Load more
+      <div className='postings-pagination' aria-label='Postings pagination'>
+        <div className='postings-pagination__nav'>
+          <button
+            type='button'
+            className='postings-pagination__arrow'
+            onClick={goToPrevPage}
+            disabled={!canGoPrev || postingsLoading}
+            aria-label='Previous page'
+          >
+            ←
+          </button>
+          <span className='postings-pagination__status'>
+            {postingsLoading && filteredCount === undefined
+              ? 'Loading…'
+              : `Page ${currentPage} of ${totalPages}`}
+          </span>
+          <button
+            type='button'
+            className='postings-pagination__arrow'
+            onClick={goToNextPage}
+            disabled={!canGoNext || postingsLoading}
+            aria-label='Next page'
+          >
+            →
           </button>
         </div>
-      ) : null}
-      {postingsStatus === 'LoadingMore' ? (
-        <p className='panel-subtitle tight postings-load-more-status'>Loading more…</p>
-      ) : null}
+        <label className='postings-page-size'>
+          <span className='postings-page-size__label'>Rows per page</span>
+          <select
+            value={postingPageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value) as PageSizeOption)}
+          >
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       {scoreTargets.length ? (
         <div className='modal-overlay' onClick={closeScoreDialog} role='presentation'>
           <div className='modal-card' onClick={(event) => event.stopPropagation()} role='dialog' aria-modal='true'>

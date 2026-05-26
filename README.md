@@ -9,7 +9,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 - Postings viewer (`apps/web/src/components/PostingViewer.tsx`) with:
   - humanized discovered timestamps (same-day time, older relative age)
   - **sticky toolbar** (below the nav): search, source (always lists all configured sources), **rank status** (all / ranked only / unranked only), min score, sort, **rows per page** (10 / 20 / 50 / 100, default 20, persisted in `localStorage`), **Select all visible**, bulk **Score selected** / **Delete selected** — stays visible while scrolling the list
-  - **paginated list** via `postings.listPage` + **Load more** (`usePaginatedQuery`); subtitle shows loaded count vs total
+  - **paginated list** via `postings.listPage` with **page navigation** (prev/next, page X of Y) and **rows per page** at the bottom; header shows matching count vs database total
   - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), **server-truncated** description preview (~140 chars) with **Show full description** (lazy `postings.getDescription`), ranking details: **compact rubric strip** from `dimensionScoresJson`, **matched / unmet / red flag** pills from list payload, **Show full scoring table** (lazy `ranking.getLatestReasoning` — full GFM table + details)
   - filters: `postings.listPage` supports `rankStatus` (`ranked` | `unranked`) in addition to text search, source, `minScore`, and sort (`scoreDesc`, `rankedAtDesc`, `discoveredAtDesc`, `postedAtDesc`). Free-text search scans full descriptions server-side but returns truncated snippets on the wire (slower on large tables).
   - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes (larger click targets), bulk `Score selected` / `Delete selected`, and `Clear All`
@@ -109,6 +109,7 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.sourcePresets.remove`
 - `api.postings.list` (legacy full scan; prefer `listPage` for the UI)
 - `api.postings.listPage` (paginated preview rows — see field contract below)
+- `api.postings.listPageCount` (filtered row count for page X of Y)
 - `api.postings.getDescription` (full `descriptionSnippet` for list expand)
 - `api.postings.getDetail` (full posting + latest ranking for View modal)
 - `api.postings.count`

@@ -21,13 +21,16 @@ const listSortValidator = v.union(
 
 type ListSort = 'discoveredAtDesc' | 'rankedAtDesc' | 'postedAtDesc' | 'scoreDesc';
 
-type ListPageArgs = {
-  paginationOpts: { numItems: number; cursor: string | null };
+type ListFilterArgs = {
   query?: string;
   source?: string;
   minScore?: number;
   sort?: ListSort;
   rankStatus?: 'ranked' | 'unranked';
+};
+
+type ListPageArgs = ListFilterArgs & {
+  paginationOpts: { numItems: number; cursor: string | null };
 };
 
 function postingMatchesTextQuery(posting: Doc<'job_postings'>, normalizedQuery: string): boolean {
@@ -119,13 +122,10 @@ async function attachRankingPreviews(
 }
 
 /**
- * Text search path: scan matching postings, sort in memory, return a manual page slice.
+ * Returns postings matching list filters when a free-text query is set (full scan).
  */
-async function listPageWithTextSearch(ctx: QueryCtx, args: ListPageArgs) {
-  const normalizedQuery = args.query!.trim().toLowerCase();
-  const numItems = capListPageNumItems(args.paginationOpts.numItems);
-  const offset = decodeSearchListCursor(args.paginationOpts.cursor);
-
+async function collectTextSearchMatches(ctx: QueryCtx, args: ListFilterArgs & { query: string }) {
+  const normalizedQuery = args.query.trim().toLowerCase();
   const sourceFiltered = args.source
     ? await ctx.db
         .query('job_postings')
@@ -134,29 +134,14 @@ async function listPageWithTextSearch(ctx: QueryCtx, args: ListPageArgs) {
     : await ctx.db.query('job_postings').collect();
 
   const sortBy = args.sort ?? 'discoveredAtDesc';
-  const matched = sourceFiltered
+  return sourceFiltered
     .filter((posting) => postingMatchesTextQuery(posting, normalizedQuery))
     .filter((posting) => postingMatchesRankFilters(posting, args))
     .sort((a, b) => comparePostingsForSort(a, b, sortBy));
-
-  const pagePostings = matched.slice(offset, offset + numItems);
-  const page = await attachRankingPreviews(ctx, pagePostings);
-  const nextOffset = offset + pagePostings.length;
-  const isDone = nextOffset >= matched.length;
-
-  return {
-    page,
-    isDone,
-    continueCursor: isDone ? '' : encodeSearchListCursor(nextOffset),
-  };
 }
 
-/**
- * Index-backed paginated list when no free-text query is set.
- */
-async function listPageIndexed(ctx: QueryCtx, args: ListPageArgs) {
+function buildIndexedFilteredQuery(ctx: QueryCtx, args: ListFilterArgs) {
   const sortBy = args.sort ?? 'discoveredAtDesc';
-  const numItems = capListPageNumItems(args.paginationOpts.numItems);
 
   let baseQuery;
   if (sortBy === 'scoreDesc') {
@@ -178,6 +163,35 @@ async function listPageIndexed(ctx: QueryCtx, args: ListPageArgs) {
   if (args.source && sortBy !== 'discoveredAtDesc') {
     filtered = applySourceFilter(filtered, args.source);
   }
+  return filtered;
+}
+
+/**
+ * Text search path: scan matching postings, sort in memory, return a manual page slice.
+ */
+async function listPageWithTextSearch(ctx: QueryCtx, args: ListPageArgs) {
+  const numItems = capListPageNumItems(args.paginationOpts.numItems);
+  const offset = decodeSearchListCursor(args.paginationOpts.cursor);
+
+  const matched = await collectTextSearchMatches(ctx, { ...args, query: args.query! });
+  const pagePostings = matched.slice(offset, offset + numItems);
+  const page = await attachRankingPreviews(ctx, pagePostings);
+  const nextOffset = offset + pagePostings.length;
+  const isDone = nextOffset >= matched.length;
+
+  return {
+    page,
+    isDone,
+    continueCursor: isDone ? '' : encodeSearchListCursor(nextOffset),
+  };
+}
+
+/**
+ * Index-backed paginated list when no free-text query is set.
+ */
+async function listPageIndexed(ctx: QueryCtx, args: ListPageArgs) {
+  const numItems = capListPageNumItems(args.paginationOpts.numItems);
+  const filtered = buildIndexedFilteredQuery(ctx, args);
 
   const result = await filtered.paginate({
     numItems,
@@ -223,5 +237,40 @@ export const listPage = query({
       return await listPageWithTextSearch(ctx, listArgs);
     }
     return await listPageIndexed(ctx, listArgs);
+  },
+});
+
+const listFilterArgsValidator = {
+  pageSize: v.optional(v.number()),
+  query: v.optional(v.string()),
+  source: v.optional(v.string()),
+  minScore: v.optional(v.number()),
+  sort: v.optional(listSortValidator),
+  rankStatus: v.optional(v.union(v.literal('ranked'), v.literal('unranked'))),
+};
+
+/**
+ * Count of postings matching the same filters as `listPage` (for page X of Y).
+ */
+export const listPageCount = query({
+  args: listFilterArgsValidator,
+  handler: async (ctx, args) => {
+    const normalizedQuery = args.query?.trim().toLowerCase();
+    const filterArgs: ListFilterArgs = {
+      query: normalizedQuery || undefined,
+      source: args.source?.trim() || undefined,
+      minScore: args.minScore,
+      sort: args.sort,
+      rankStatus: args.rankStatus,
+    };
+
+    if (normalizedQuery) {
+      const matched = await collectTextSearchMatches(ctx, { ...filterArgs, query: normalizedQuery });
+      return matched.length;
+    }
+
+    const filtered = buildIndexedFilteredQuery(ctx, filterArgs);
+    const rows = await filtered.collect();
+    return rows.length;
   },
 });
