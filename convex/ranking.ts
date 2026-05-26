@@ -1,5 +1,6 @@
 import { mutation, query } from './_generated/server.js';
 import { v } from 'convex/values';
+import { patchPostingLatestRankingDenorm } from './postingsListHelpers.js';
 import { normalizeRankingForPersist } from './rankingPersist.js';
 
 const rankingResultValidator = v.object({
@@ -104,6 +105,8 @@ export const upsertResults = mutation({
         createdAt: now,
         updatedAt: now,
       });
+
+      await patchPostingLatestRankingDenorm(ctx, ranking.postingId, rankedAt, ranking.scoreOverall);
     }
 
     return {
@@ -111,6 +114,30 @@ export const upsertResults = mutation({
       rankedAt,
       inputCount: args.rankings.length,
       dedupedInBatch: deduped,
+    };
+  },
+});
+
+/** Full reasoning markdown for lazy expand on the postings list. */
+export const getLatestReasoning = query({
+  args: {
+    postingId: v.id('job_postings'),
+  },
+  handler: async (ctx, args) => {
+    const latest =
+      (
+        await ctx.db
+          .query('job_rankings')
+          .withIndex('by_posting_ranked_at', (q) => q.eq('postingId', args.postingId))
+          .order('desc')
+          .take(1)
+      )[0] ?? null;
+    if (!latest) {
+      return null;
+    }
+    return {
+      postingId: args.postingId,
+      reasoningSummary: latest.reasoningSummary,
     };
   },
 });

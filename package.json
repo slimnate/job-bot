@@ -12,6 +12,7 @@
     "trigger:linkedin": "node --env-file=.env.local scripts/trigger-linkedin-run.mjs",
     "populate:ranking-catalog": "node --env-file=.env.local scripts/populate-ranking-llm-catalog.mjs",
     "backfill:ranking-dimensions": "npx convex run rankingMigrate:startBackfill",
+    "backfill:postings-denorm": "npx convex run internal.postings.backfillLatestRankingDenorm",
     "test:worker": "npm run test --workspace=@job-bot/worker"
   },
   "devDependencies": {

@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from 'convex/react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { FunctionReturnType } from 'convex/server';
+
+import { api } from '../../../../convex/_generated/api.js';
+import type { Id } from '../../../../convex/_generated/dataModel.js';
 import { formatHumanizedTime } from '../lib/time';
+import {
+  DimensionScoresCompactTable,
+  type DimensionScoresRecord,
+} from '../lib/dimensionScoresTable.js';
 import {
   parseReasoningScoreTable,
   scoreCellToPercent,
   toPillItems,
 } from '../lib/parseReasoningScoreTable.js';
-import type { Doc } from '../../../../convex/_generated/dataModel.js';
 
-export type PostingTableRow = Doc<'job_postings'> & {
-  latestRanking: Doc<'job_rankings'> | null;
-};
+export type PostingTableRow = FunctionReturnType<typeof api.postings.listPage>['page'][number];
 
 const formatDateTime = (timestamp?: number): string => {
   if (!timestamp) {
@@ -20,10 +26,6 @@ const formatDateTime = (timestamp?: number): string => {
   return new Date(timestamp).toLocaleString();
 };
 
-/**
- * Maps score ranges to semantic color classes for quick scanning.
- */
-/** Formats the headline overall score with a /100 suffix when ranked. */
 const formatOverallScore = (score?: number | null): string => {
   if (typeof score !== 'number' || Number.isNaN(score)) {
     return '-';
@@ -47,35 +49,27 @@ const getScoreColorClass = (score?: number | null): string => {
   return 'posting-item__score--red';
 };
 
-const DESCRIPTION_PREVIEW_MAX_CHARS = 140;
-
-/**
- * Keeps description previews scannable while preserving the full text in a tooltip.
- */
-const formatDescriptionPreview = (descriptionSnippet?: string): { preview: string; full: string } => {
-  const full = (descriptionSnippet ?? '').trim();
-  if (!full) {
-    return { preview: '-', full: '' };
-  }
-  if (full.length <= DESCRIPTION_PREVIEW_MAX_CHARS) {
-    return { preview: full, full };
-  }
-  return { preview: `${full.slice(0, DESCRIPTION_PREVIEW_MAX_CHARS - 1)}…`, full };
-};
-
 type PostingDescriptionProps = {
-  descriptionSnippet?: string;
+  postingId: Id<'job_postings'>;
+  descriptionSnippet: string;
 };
 
 /**
- * Compact description line with optional expand/collapse when the snippet is longer than the preview cap.
+ * List description with lazy fetch when the server-truncated snippet is expanded.
  */
-function PostingDescription({ descriptionSnippet }: PostingDescriptionProps) {
-  const { preview, full } = formatDescriptionPreview(descriptionSnippet);
+function PostingDescription({ postingId, descriptionSnippet }: PostingDescriptionProps) {
   const [expanded, setExpanded] = useState(false);
-  const expandable = full.length > DESCRIPTION_PREVIEW_MAX_CHARS;
+  const isTruncated = descriptionSnippet.endsWith('…');
+  const fullDescription = useQuery(
+    api.postings.getDescription,
+    expanded && isTruncated ? { postingId } : 'skip'
+  );
 
-  if (!full) {
+  const displayText = expanded
+    ? (fullDescription?.descriptionSnippet ?? descriptionSnippet).trim() || '-'
+    : descriptionSnippet.trim() || '-';
+
+  if (!descriptionSnippet.trim() && !expanded) {
     return (
       <div className='posting-item__description'>
         <p className='posting-item__description-text'>-</p>
@@ -85,16 +79,16 @@ function PostingDescription({ descriptionSnippet }: PostingDescriptionProps) {
 
   const wrapperClass = [
     'posting-item__description',
-    expandable ? 'posting-item__description--expandable' : '',
-    expandable && expanded ? 'posting-item__description--expanded' : '',
+    isTruncated ? 'posting-item__description--expandable' : '',
+    isTruncated && expanded ? 'posting-item__description--expanded' : '',
   ]
     .filter(Boolean)
     .join(' ');
 
   return (
     <div className={wrapperClass}>
-      <p className='posting-item__description-text'>{expanded ? full : preview}</p>
-      {expandable ? (
+      <p className='posting-item__description-text'>{displayText}</p>
+      {isTruncated ? (
         <button
           type='button'
           className='posting-item__description-toggle'
@@ -113,9 +107,6 @@ type ReasoningMarkdownProps = {
   className?: string;
 };
 
-/**
- * Renders LLM reasoning as markdown with GFM tables enabled.
- */
 function ReasoningMarkdown({ value, className }: ReasoningMarkdownProps) {
   const content = value?.trim();
   if (!content) {
@@ -132,41 +123,11 @@ type ReasoningScoreTableProps = {
   reasoningSummary: string;
 };
 
-/**
- * Fallback when reasoning has no parseable GFM table (legacy or non-standard output).
- */
 function ReasoningFallback({ content }: { content: string }) {
-  const [reasoningExpanded, setReasoningExpanded] = useState(false);
-  if (!content) {
-    return null;
-  }
-  if (content.length <= 200) {
-    return <ReasoningMarkdown value={content} className='posting-item__reasoning' />;
-  }
-  return (
-    <div className='posting-item__reasoning-fallback'>
-      {reasoningExpanded ? (
-        <ReasoningMarkdown value={content} className='posting-item__reasoning' />
-      ) : (
-        <p className='posting-item__reasoning-preview'>{`${content.slice(0, 199)}…`}</p>
-      )}
-      <button
-        type='button'
-        className='posting-item__description-toggle'
-        onClick={() => setReasoningExpanded((v) => !v)}
-        aria-expanded={reasoningExpanded}
-      >
-        {reasoningExpanded ? 'Show less reasoning' : 'Show reasoning'}
-      </button>
-    </div>
-  );
+  return <ReasoningMarkdown value={content} className='posting-item__reasoning' />;
 }
 
-/**
- * Compact rubric table: criteria names as column headers, scores in one row; expand for vertical details table.
- */
 function ReasoningScoreTable({ reasoningSummary }: ReasoningScoreTableProps) {
-  const [expanded, setExpanded] = useState(false);
   const parsed = useMemo(() => parseReasoningScoreTable(reasoningSummary), [reasoningSummary]);
 
   if (!parsed) {
@@ -177,62 +138,29 @@ function ReasoningScoreTable({ reasoningSummary }: ReasoningScoreTableProps) {
 
   return (
     <div className='posting-item__score-table-wrap'>
-      {expanded ? (
-        <table className='posting-score-table posting-score-table--expanded'>
-          <thead>
-            <tr>
-              <th scope='col'>Criteria</th>
-              <th scope='col'>Score</th>
-              <th scope='col'>Details</th>
+      <table className='posting-score-table posting-score-table--expanded'>
+        <thead>
+          <tr>
+            <th scope='col'>Criteria</th>
+            <th scope='col'>Score</th>
+            <th scope='col'>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.name}-${index}`}>
+              <td>{row.name}</td>
+              <td className={getScoreColorClass(scoreCellToPercent(row.score))}>{row.score}</td>
+              <td>{row.details ?? '—'}</td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={`${row.name}-${index}`}>
-                <td>{row.name}</td>
-                <td className={getScoreColorClass(scoreCellToPercent(row.score))}>{row.score}</td>
-                <td>{row.details ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div className='posting-score-table-scroll'>
-            <table className='posting-score-table posting-score-table--compact'>
-              <thead>
-                <tr>
-                  {rows.map((row, index) => (
-                    <th key={`${row.name}-${index}`} scope='col'>
-                      {row.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  {rows.map((row, index) => (
-                    <td
-                      key={`${row.name}-${index}-score`}
-                      className={getScoreColorClass(scoreCellToPercent(row.score))}
-                    >
-                      {row.score}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-        </div>
-      )}
-      <button
-        type='button'
-        className='posting-item__description-toggle'
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        {expanded ? 'Hide full scoring table' : 'Show full scoring table'}
-      </button>
+          ))}
+        </tbody>
+      </table>
       {remainderMarkdown ? (
-        <ReasoningMarkdown value={remainderMarkdown} className='posting-item__reasoning posting-item__reasoning--remainder' />
+        <ReasoningMarkdown
+          value={remainderMarkdown}
+          className='posting-item__reasoning posting-item__reasoning--remainder'
+        />
       ) : null}
     </div>
   );
@@ -244,9 +172,6 @@ type CollapsibleBadgeRowProps = {
   badgeClass: string;
 };
 
-/**
- * Single-line flag badges with "+N more" expander when multiple items exist.
- */
 function CollapsibleBadgeRow({ label, items, badgeClass }: CollapsibleBadgeRowProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -298,14 +223,23 @@ function CollapsibleBadgeRow({ label, items, badgeClass }: CollapsibleBadgeRowPr
   );
 }
 
+type RankingPreview = NonNullable<PostingTableRow['latestRanking']>;
+
 type RankingDetailsProps = {
-  ranking: Doc<'job_rankings'> | null;
+  postingId: Id<'job_postings'>;
+  ranking: RankingPreview | null;
 };
 
 /**
- * Ranking section: compact score table, collapsible flags, model, criteria pills, remainder prose.
+ * Ranking section: compact dimension strip from list payload; full table via lazy query on expand.
  */
-function RankingDetails({ ranking }: RankingDetailsProps) {
+function RankingDetails({ postingId, ranking }: RankingDetailsProps) {
+  const [scoringExpanded, setScoringExpanded] = useState(false);
+  const reasoningPayload = useQuery(
+    api.ranking.getLatestReasoning,
+    scoringExpanded ? { postingId } : 'skip'
+  );
+
   if (!ranking) {
     return (
       <div className='posting-item__ranking'>
@@ -315,23 +249,154 @@ function RankingDetails({ ranking }: RankingDetailsProps) {
   }
 
   const criteriaMatch =
-    ranking.criteriaMatchJson && typeof ranking.criteriaMatchJson === 'object' && !Array.isArray(ranking.criteriaMatchJson)
+    ranking.criteriaMatchJson &&
+    typeof ranking.criteriaMatchJson === 'object' &&
+    !Array.isArray(ranking.criteriaMatchJson)
       ? (ranking.criteriaMatchJson as Record<string, unknown>)
       : null;
 
   const matchedItems = criteriaMatch ? toPillItems(criteriaMatch.matched) : [];
   const unmetItems = criteriaMatch ? toPillItems(criteriaMatch.unmet) : [];
   const redFlagItems = ranking.redFlags ?? [];
+  const dimensionScores = (ranking.dimensionScoresJson ?? undefined) as DimensionScoresRecord | undefined;
+  const hasCompactScores = Boolean(dimensionScores && Object.keys(dimensionScores).length > 0);
 
   return (
     <div className='posting-item__ranking'>
-      <ReasoningScoreTable reasoningSummary={ranking.reasoningSummary} />
-      <CollapsibleBadgeRow label='matched' items={matchedItems} badgeClass='matched' />
-      <CollapsibleBadgeRow label='unmet' items={unmetItems} badgeClass='unmet' />
+      {scoringExpanded ? (
+        reasoningPayload === undefined ? (
+          <p className='posting-item__ranking-empty'>Loading scoring details…</p>
+        ) : reasoningPayload?.reasoningSummary ? (
+          <ReasoningScoreTable reasoningSummary={reasoningPayload.reasoningSummary} />
+        ) : (
+          <p className='posting-item__ranking-empty'>No reasoning available.</p>
+        )
+      ) : hasCompactScores ? (
+        <DimensionScoresCompactTable scores={dimensionScores!} getScoreColorClass={getScoreColorClass} />
+      ) : null}
+      <button
+        type='button'
+        className='posting-item__description-toggle'
+        onClick={() => setScoringExpanded((v) => !v)}
+        aria-expanded={scoringExpanded}
+      >
+        {scoringExpanded ? 'Hide full scoring table' : 'Show full scoring table'}
+      </button>
+      <CollapsibleBadgeRow label='Green flags' items={matchedItems} badgeClass='matched' />
+      <CollapsibleBadgeRow label='Yellow flags' items={unmetItems} badgeClass='unmet' />
       <CollapsibleBadgeRow label='Red flags' items={redFlagItems} badgeClass='red' />
-      <p className='posting-item__model-line'>
-        <span className='posting-item__model-label'>Model</span> {ranking.model}
-      </p>
+    </div>
+  );
+}
+
+type ViewPostingModalProps = {
+  postingId: Id<'job_postings'>;
+  title: string;
+  onClose: () => void;
+};
+
+function ViewPostingModal({ postingId, title, onClose }: ViewPostingModalProps) {
+  const detail = useQuery(api.postings.getDetail, { postingId });
+  const [rawJsonCopyStatus, setRawJsonCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  const rawPostingJson = useMemo(
+    () => (detail ? JSON.stringify(detail, null, 2) : ''),
+    [detail]
+  );
+
+  useEffect(() => {
+    setRawJsonCopyStatus('idle');
+  }, [postingId]);
+
+  const copyRawPostingJson = async () => {
+    if (!rawPostingJson) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(rawPostingJson);
+      setRawJsonCopyStatus('copied');
+      window.setTimeout(() => setRawJsonCopyStatus('idle'), 2000);
+    } catch {
+      setRawJsonCopyStatus('error');
+      window.setTimeout(() => setRawJsonCopyStatus('idle'), 3000);
+    }
+  };
+
+  const posting = detail?.posting;
+  const latestRanking = detail?.latestRanking;
+
+  return (
+    <div className='modal-overlay' onClick={onClose} role='presentation'>
+      <div className='modal-card' onClick={(event) => event.stopPropagation()} role='dialog' aria-modal='true'>
+        <div className='modal-header'>
+          <h3>{title}</h3>
+          <button type='button' onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <div className='modal-body'>
+          {detail === undefined ? (
+            <p className='posting-list-empty'>Loading…</p>
+          ) : !posting ? (
+            <p className='posting-list-empty'>Posting not found.</p>
+          ) : (
+            <>
+              <dl className='details-grid'>
+                <dt>Company</dt>
+                <dd>{posting.company}</dd>
+                <dt>Location</dt>
+                <dd>{posting.location ?? '-'}</dd>
+                <dt>Source</dt>
+                <dd>{posting.source}</dd>
+                <dt>External ID</dt>
+                <dd>{posting.externalId}</dd>
+                <dt>Posted</dt>
+                <dd>{formatDateTime(posting.postedAt)}</dd>
+                <dt>Discovered</dt>
+                <dd>{formatDateTime(posting.discoveredAt)}</dd>
+                <dt>Latest score</dt>
+                <dd>{latestRanking?.scoreOverall ?? '-'}</dd>
+                <dt>Latest reasoning</dt>
+                <dd>
+                  <ReasoningMarkdown
+                    value={latestRanking?.reasoningSummary}
+                    className='details-grid__markdown'
+                  />
+                </dd>
+                <dt>Created</dt>
+                <dd>{formatDateTime(posting.createdAt)}</dd>
+                <dt>Updated</dt>
+                <dd>{formatDateTime(posting.updatedAt)}</dd>
+                <dt>Run ID</dt>
+                <dd>{posting.scrapeRunId ?? '-'}</dd>
+                <dt>URL</dt>
+                <dd>
+                  <a className='posting-external-link' href={posting.url} target='_blank' rel='noreferrer'>
+                    {posting.url}
+                  </a>
+                </dd>
+                <dt>Salary</dt>
+                <dd>{posting.salaryText ?? '-'}</dd>
+                <dt>Description</dt>
+                <dd className='details-grid__description-full'>{posting.descriptionSnippet ?? '-'}</dd>
+              </dl>
+              <details>
+                <summary>Raw JSON</summary>
+                <div className='raw-json-toolbar'>
+                  <button type='button' onClick={() => void copyRawPostingJson()}>
+                    {rawJsonCopyStatus === 'copied'
+                      ? 'Copied'
+                      : rawJsonCopyStatus === 'error'
+                        ? 'Copy failed — try again'
+                        : 'Copy to clipboard'}
+                  </button>
+                </div>
+                <pre className='run-log-dump'>{rawPostingJson}</pre>
+              </details>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -341,7 +406,6 @@ type PostingTableProps = {
   emptyMessage?: string;
   deletingPostingId?: string | null;
   onDeletePosting?: (posting: PostingTableRow) => Promise<void>;
-  /** When set, shows a **Score** action that opens the manual scoring flow (postings page). */
   onOpenScoreDialog?: (posting: PostingTableRow) => void;
   selectedPostingIds?: Set<string>;
   onTogglePostingSelection?: (postingId: string, checked: boolean) => void;
@@ -358,36 +422,17 @@ export function PostingTable({
 }: PostingTableProps) {
   const showActions = Boolean(onDeletePosting || onOpenScoreDialog);
   const showSelection = Boolean(onTogglePostingSelection);
-  const [selectedPostingId, setSelectedPostingId] = useState<string | null>(null);
-  const [rawJsonCopyStatus, setRawJsonCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
-  const selectedPosting = useMemo(
-    () => postings?.find((posting) => posting._id === selectedPostingId) ?? null,
-    [postings, selectedPostingId]
-  );
+  const [selectedPostingId, setSelectedPostingId] = useState<Id<'job_postings'> | null>(null);
+  const [selectedPostingTitle, setSelectedPostingTitle] = useState('');
 
-  const rawPostingJson = useMemo(
-    () => (selectedPosting ? JSON.stringify(selectedPosting, null, 2) : ''),
-    [selectedPosting]
-  );
+  const closeModal = () => {
+    setSelectedPostingId(null);
+    setSelectedPostingTitle('');
+  };
 
-  useEffect(() => {
-    setRawJsonCopyStatus('idle');
-  }, [selectedPostingId]);
-
-  const closeModal = () => setSelectedPostingId(null);
-
-  const copyRawPostingJson = async () => {
-    if (!rawPostingJson) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(rawPostingJson);
-      setRawJsonCopyStatus('copied');
-      window.setTimeout(() => setRawJsonCopyStatus('idle'), 2000);
-    } catch {
-      setRawJsonCopyStatus('error');
-      window.setTimeout(() => setRawJsonCopyStatus('idle'), 3000);
-    }
+  const openModal = (posting: PostingTableRow) => {
+    setSelectedPostingId(posting._id);
+    setSelectedPostingTitle(posting.title);
   };
 
   const onDelete = async (posting: PostingTableRow) => {
@@ -433,7 +478,7 @@ export function PostingTable({
                         ) : null}
                         {showActions ? (
                           <span className='posting-item__controls-actions'>
-                            <button type='button' onClick={() => setSelectedPostingId(posting._id)}>
+                            <button type='button' onClick={() => openModal(posting)}>
                               View
                             </button>
                             {onOpenScoreDialog ? (
@@ -493,8 +538,11 @@ export function PostingTable({
                         {formatHumanizedTime(posting.discoveredAt)}
                       </span>
                     </div>
-                    <PostingDescription descriptionSnippet={posting.descriptionSnippet} />
-                    <RankingDetails ranking={posting.latestRanking} />
+                    <PostingDescription
+                      postingId={posting._id}
+                      descriptionSnippet={posting.descriptionSnippet}
+                    />
+                    <RankingDetails postingId={posting._id} ranking={posting.latestRanking} />
                   </article>
                 </li>
               );
@@ -504,78 +552,8 @@ export function PostingTable({
           <p className='posting-list-empty'>{emptyMessage}</p>
         )}
       </div>
-      {selectedPosting ? (
-        <div className='modal-overlay' onClick={closeModal} role='presentation'>
-          <div className='modal-card' onClick={(event) => event.stopPropagation()} role='dialog' aria-modal='true'>
-            <div className='modal-header'>
-              <h3>{selectedPosting.title}</h3>
-              <button type='button' onClick={closeModal}>
-                Close
-              </button>
-            </div>
-            <div className='modal-body'>
-              <dl className='details-grid'>
-                <dt>Company</dt>
-                <dd>{selectedPosting.company}</dd>
-                <dt>Location</dt>
-                <dd>{selectedPosting.location ?? '-'}</dd>
-                <dt>Source</dt>
-                <dd>{selectedPosting.source}</dd>
-                <dt>External ID</dt>
-                <dd>{selectedPosting.externalId}</dd>
-                <dt>Posted</dt>
-                <dd>{formatDateTime(selectedPosting.postedAt)}</dd>
-                <dt>Discovered</dt>
-                <dd>{formatDateTime(selectedPosting.discoveredAt)}</dd>
-                <dt>Latest score</dt>
-                <dd>{selectedPosting.latestRanking?.scoreOverall ?? '-'}</dd>
-                <dt>Latest reasoning</dt>
-                <dd>
-                  <ReasoningMarkdown
-                    value={selectedPosting.latestRanking?.reasoningSummary}
-                    className='details-grid__markdown'
-                  />
-                </dd>
-                <dt>Created</dt>
-                <dd>{formatDateTime(selectedPosting.createdAt)}</dd>
-                <dt>Updated</dt>
-                <dd>{formatDateTime(selectedPosting.updatedAt)}</dd>
-                <dt>Run ID</dt>
-                <dd>{selectedPosting.scrapeRunId ?? '-'}</dd>
-                <dt>URL</dt>
-                <dd>
-                  <a
-                    className='posting-external-link'
-                    href={selectedPosting.url}
-                    target='_blank'
-                    rel='noreferrer'
-                  >
-                    {selectedPosting.url}
-                  </a>
-                </dd>
-                <dt>Salary</dt>
-                <dd>{selectedPosting.salaryText ?? '-'}</dd>
-                <dt>Description</dt>
-                <dd className='details-grid__description-full'>
-                  {selectedPosting.descriptionSnippet ?? '-'}
-                </dd>
-              </dl>
-              <details>
-                <summary>Raw JSON</summary>
-                <div className='raw-json-toolbar'>
-                  <button type='button' onClick={() => void copyRawPostingJson()}>
-                    {rawJsonCopyStatus === 'copied'
-                      ? 'Copied'
-                      : rawJsonCopyStatus === 'error'
-                        ? 'Copy failed — try again'
-                        : 'Copy to clipboard'}
-                  </button>
-                </div>
-                <pre className='run-log-dump'>{rawPostingJson}</pre>
-              </details>
-            </div>
-          </div>
-        </div>
+      {selectedPostingId ? (
+        <ViewPostingModal postingId={selectedPostingId} title={selectedPostingTitle} onClose={closeModal} />
       ) : null}
     </>
   );

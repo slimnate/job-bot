@@ -1,15 +1,16 @@
 import { Link } from 'react-router-dom';
-import { useQuery } from 'convex/react';
+import { usePaginatedQuery, useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
 import { PostingTable } from '../components/PostingTable';
 
 export function DashboardHome() {
   const totalPostings = useQuery(api.postings.count);
-  const previewPostings = useQuery(api.postings.list, {
-    sort: 'scoreDesc',
-    limit: 10,
-  });
+  const { results: previewPostings, isLoading: previewLoading } = usePaginatedQuery(
+    api.postings.listPage,
+    { sort: 'scoreDesc', pageSize: 10 },
+    { initialNumItems: 10 }
+  );
 
   return (
     <>
@@ -53,7 +54,7 @@ export function DashboardHome() {
         <p className='panel-subtitle'>Showing up to 10. Visit ranked postings for the full list.</p>
         <PostingTable
           postings={previewPostings}
-          emptyMessage={previewPostings === undefined ? 'Loading…' : 'No postings yet.'}
+          emptyMessage={previewLoading && !previewPostings.length ? 'Loading…' : 'No postings yet.'}
         />
         <p className='dashboard-more'>
           <Link to='/postings'>View all ranked postings →</Link>

@@ -88,12 +88,19 @@ export default defineSchema({
     discoveredAt: v.number(),
     scrapeRunId: v.optional(v.id('scrape_runs')),
     rawPayload: v.optional(v.any()),
+    /** Denormalized from latest `job_rankings` row for list sort/filter without N+1 scans. */
+    latestScoreOverall: v.optional(v.number()),
+    latestRankedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index('by_source_external_id', ['source', 'externalId'])
     .index('by_discovered_at', ['discoveredAt'])
-    .index('by_company', ['company']),
+    .index('by_company', ['company'])
+    .index('by_latest_score', ['latestScoreOverall'])
+    .index('by_latest_ranked_at', ['latestRankedAt'])
+    .index('by_source_discovered_at', ['source', 'discoveredAt'])
+    .index('by_posted_at', ['postedAt']),
 
   job_rankings: defineTable({
     postingId: v.id('job_postings'),

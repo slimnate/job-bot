@@ -1,7 +1,10 @@
-import { mutation, query } from './_generated/server.js';
-import { api } from './_generated/api.js';
+import { internalMutation, mutation, query } from './_generated/server.js';
+import { api, internal } from './_generated/api.js';
 import { v } from 'convex/values';
 import type { Doc } from './_generated/dataModel.js';
+import { getLatestRankingForPosting } from './postingsListHelpers.js';
+
+export { listPage } from './postingsListPage.js';
 
 /** Posting row returned by `list`, with the latest `job_rankings` document attached (or null). */
 type PostingWithRanking = Doc<'job_postings'> & {
@@ -131,6 +134,74 @@ export const getById = query({
   },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.postingId);
+  },
+});
+
+/** Full description for a posting (lazy expand on the list UI). */
+export const getDescription = query({
+  args: {
+    postingId: v.id('job_postings'),
+  },
+  handler: async (ctx, args) => {
+    const posting = await ctx.db.get(args.postingId);
+    if (!posting) {
+      return null;
+    }
+    return {
+      postingId: posting._id,
+      descriptionSnippet: posting.descriptionSnippet,
+    };
+  },
+});
+
+/** Full posting + latest ranking for the View modal. */
+export const getDetail = query({
+  args: {
+    postingId: v.id('job_postings'),
+  },
+  handler: async (ctx, args) => {
+    const posting = await ctx.db.get(args.postingId);
+    if (!posting) {
+      return null;
+    }
+    const latestRanking = await getLatestRankingForPosting(ctx, posting._id);
+    return { posting, latestRanking };
+  },
+});
+
+/**
+ * Backfills `latestScoreOverall` / `latestRankedAt` on all postings from ranking history.
+ * Run once after deploy: `npx convex run postings:backfillLatestRankingDenorm`
+ */
+export const backfillLatestRankingDenorm = internalMutation({
+  args: {
+    cursor: v.optional(v.string()),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const batchSize =
+      args.batchSize && args.batchSize > 0 ? Math.min(Math.floor(args.batchSize), 200) : 100;
+    const result = await ctx.db.query('job_postings').paginate({
+      numItems: batchSize,
+      cursor: args.cursor ?? null,
+    });
+
+    for (const posting of result.page) {
+      const latest = await getLatestRankingForPosting(ctx, posting._id);
+      await ctx.db.patch(posting._id, {
+        latestScoreOverall: latest?.scoreOverall,
+        latestRankedAt: latest?.rankedAt,
+      });
+    }
+
+    if (!result.isDone) {
+      await ctx.scheduler.runAfter(0, internal.postings.backfillLatestRankingDenorm, {
+        cursor: result.continueCursor,
+        batchSize,
+      });
+    }
+
+    return { patched: result.page.length, hasMore: !result.isDone };
   },
 });
 

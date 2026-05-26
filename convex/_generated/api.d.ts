@@ -11,6 +11,8 @@
 import type * as appSettings from "../appSettings.js";
 import type * as evaluators from "../evaluators.js";
 import type * as postings from "../postings.js";
+import type * as postingsListHelpers from "../postingsListHelpers.js";
+import type * as postingsListPage from "../postingsListPage.js";
 import type * as ranking from "../ranking.js";
 import type * as rankingLlmCatalog from "../rankingLlmCatalog.js";
 import type * as rankingMigrate from "../rankingMigrate.js";
@@ -35,6 +37,8 @@ declare const fullApi: ApiFromModules<{
   appSettings: typeof appSettings;
   evaluators: typeof evaluators;
   postings: typeof postings;
+  postingsListHelpers: typeof postingsListHelpers;
+  postingsListPage: typeof postingsListPage;
   ranking: typeof ranking;
   rankingLlmCatalog: typeof rankingLlmCatalog;
   rankingMigrate: typeof rankingMigrate;

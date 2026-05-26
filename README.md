@@ -8,12 +8,13 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - Evaluators (`apps/web/src/components/EvaluatorsEditor.tsx`): multiple named evaluator profiles, optional **Resume (Markdown)** and **Evaluation prompt** for the LLM, **Notes** (private — not sent to the ranker), and an **Active** flag per profile (only **Active** profiles can be chosen on queued runs; worker default ranking profile is `WORKER_DEFAULT_EVALUATOR_ID` per machine, not this flag)
 - Postings viewer (`apps/web/src/components/PostingViewer.tsx`) with:
   - humanized discovered timestamps (same-day time, older relative age)
-  - **sticky toolbar** (below the nav): search, source, **rank status** (all / ranked only / unranked only), min score, sort, **Select all visible**, bulk **Score selected** / **Delete selected** — stays visible while scrolling the list
-  - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), description preview with **Show full description** / **Show less**, and ranking details: **compact rubric score table** from `reasoningSummary`, **matched / unmet / red flag** rows from `criteriaMatchJson` / `redFlags`, model label
-  - filters: `postings.list` supports `rankStatus` (`ranked` | `unranked`) in addition to text search, source, `minScore`, and sort (`scoreDesc`, `rankedAtDesc`, `discoveredAtDesc`, `postedAtDesc`; unranked rows sort last when sorting by rank date)
+  - **sticky toolbar** (below the nav): search, source (always lists all configured sources), **rank status** (all / ranked only / unranked only), min score, sort, **rows per page** (10 / 20 / 50 / 100, default 20, persisted in `localStorage`), **Select all visible**, bulk **Score selected** / **Delete selected** — stays visible while scrolling the list
+  - **paginated list** via `postings.listPage` + **Load more** (`usePaginatedQuery`); subtitle shows loaded count vs total
+  - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), **server-truncated** description preview (~140 chars) with **Show full description** (lazy `postings.getDescription`), ranking details: **compact rubric strip** from `dimensionScoresJson`, **matched / unmet / red flag** pills from list payload, **Show full scoring table** (lazy `ranking.getLatestReasoning` — full GFM table + details)
+  - filters: `postings.listPage` supports `rankStatus` (`ranked` | `unranked`) in addition to text search, source, `minScore`, and sort (`scoreDesc`, `rankedAtDesc`, `discoveredAtDesc`, `postedAtDesc`). Free-text search scans full descriptions server-side but returns truncated snippets on the wire (slower on large tables).
   - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes (larger click targets), bulk `Score selected` / `Delete selected`, and `Clear All`
   - bulk score uses **fixed-size chunks** (default **3 postings** per LLM/CLI request); global rank is merged by `scoreOverall` after all chunks succeed
-- detailed modal view (human-readable fields + raw JSON), including latest reasoning summary rendered as markdown (supports tables/lists from LLM output)
+- **View** modal loads `postings.getDetail` (full posting + latest ranking + raw JSON), including latest reasoning summary rendered as markdown
 - Workers (`/workers`) scheduler status (`WorkerSchedulerPanel` → reactive Convex `worker_scheduler_status`), queue + history (`apps/web/src/components/HistoryViewer.tsx`, `apps/web/src/components/ScrapeQueuePanel.tsx`) with:
   - status color coding (`queued` blue, `running` yellow, `succeeded` green, `failed`/`cancelled` red)
   - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
@@ -77,7 +78,7 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `scrape_runs.usedLinkedinUrlFallback`: boolean warning flag for URL fallback usage
 - `scrape_runs.linkedinFallbackReason`: structured reason when fallback is used
 - `run_log_lines`: JSON log lines for a run (streamed from the worker; used by the Workers log modal and run log page)
-- `job_postings`: normalized postings deduplicated by source + external id
+- `job_postings`: normalized postings deduplicated by source + external id; optional denormalized `latestScoreOverall` / `latestRankedAt` for indexed list sort/filter (patched on `ranking.upsertResults`; backfill with `npm run backfill:postings-denorm`)
 - `job_rankings`: per-posting scoring outputs (`scoreOverall`, reasoning, criteria match, red flags) linked by `evaluatorId` — no `rank` field
 - `ranking_llm_providers`: stable `key`, `displayName`, `surface` (`convex_http` = OpenAI-compatible call from Convex; `worker_cursor` = Cursor CLI on the worker), `sortOrder`
 - `ranking_llm_models`: `providerKey`, `apiModelId`, `displayName`, `sortOrder` (options shown in the Score dialog)
@@ -106,9 +107,12 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.sourcePresets.create`
 - `api.sourcePresets.update`
 - `api.sourcePresets.remove`
-- `api.postings.list`
+- `api.postings.list` (legacy full scan; prefer `listPage` for the UI)
+- `api.postings.listPage` (paginated preview rows — see field contract below)
+- `api.postings.getDescription` (full `descriptionSnippet` for list expand)
+- `api.postings.getDetail` (full posting + latest ranking for View modal)
 - `api.postings.count`
-- `api.postings.getById`
+- `api.postings.getById` (worker / scripts)
 - `api.postings.upsertBatch`
 - `api.postings.deleteOne`
 - `api.postings.clearAll`
@@ -123,6 +127,7 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.runLogs.appendBatch`
 - `api.runLogs.listByRun`
 - `api.ranking.listForPosting`
+- `api.ranking.getLatestReasoning` (full `reasoningSummary` for list scoring expand)
 - `api.ranking.recompute`
 - `api.ranking.upsertResults`
 - `api.rankingLlmCatalog.listForUi` (providers + models for the Score dialog)
@@ -135,6 +140,20 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.appSettings.seedMissingSettings` (idempotent: inserts/patches only missing catalog keys from system defaults)
 - `api.workerSettingsEnv.getByWorkerId`
 - `api.workerSettingsEnv.upsertFromWorker`
+
+### Postings list bandwidth (`listPage` preview vs lazy loads)
+
+Each `listPage` row includes posting `_id`, `title`, `company`, `url`, `location`, `source`, `salaryText`, `discoveredAt`, `createdAt`, and **server-truncated** `descriptionSnippet` (~140 characters). Latest ranking preview (when ranked): `scoreOverall`, `rankedAt`, `criteriaMatchJson`, `redFlags`, `dimensionScoresJson`. Omitted from the list payload: `reasoningSummary`, full description, `rawPayload`, `model` (not shown in the list UI).
+
+| User action | Query |
+|-------------|--------|
+| Show full description | `postings.getDescription` |
+| Show full scoring table | `ranking.getLatestReasoning` |
+| View modal | `postings.getDetail` |
+
+`paginationOpts.numItems` is capped at **100** server-side. Default UI page size is **20** (user-selectable 10 / 20 / 50 / 100).
+
+After deploying schema changes for denormalized scores, run once: `npm run backfill:postings-denorm`.
 
 ## Local setup
 
