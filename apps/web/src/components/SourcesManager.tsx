@@ -280,7 +280,10 @@ export function SourcesManager() {
                       </button>
                     </div>
                   ) : (
-                    <div className='form-grid'>
+                    <div className='form-grid inline-form-card'>
+                      <h3 className='queue-add-title full-width'>
+                        {presetFormMode === 'edit' ? 'Edit preset' : 'Add preset'}
+                      </h3>
                       <label className='full-width'>
                         Preset name
                         <input

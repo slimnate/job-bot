@@ -9,6 +9,7 @@
  */
 
 import type * as appSettings from "../appSettings.js";
+import type * as crons from "../crons.js";
 import type * as evaluators from "../evaluators.js";
 import type * as postings from "../postings.js";
 import type * as postingsListHelpers from "../postingsListHelpers.js";
@@ -21,6 +22,7 @@ import type * as rankingScorePosting from "../rankingScorePosting.js";
 import type * as rankingValidators from "../rankingValidators.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runs from "../runs.js";
+import type * as schedules from "../schedules.js";
 import type * as sourceContract from "../sourceContract.js";
 import type * as sourcePresets from "../sourcePresets.js";
 import type * as sources from "../sources.js";
@@ -35,6 +37,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   appSettings: typeof appSettings;
+  crons: typeof crons;
   evaluators: typeof evaluators;
   postings: typeof postings;
   postingsListHelpers: typeof postingsListHelpers;
@@ -47,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   rankingValidators: typeof rankingValidators;
   runLogs: typeof runLogs;
   runs: typeof runs;
+  schedules: typeof schedules;
   sourceContract: typeof sourceContract;
   sourcePresets: typeof sourcePresets;
   sources: typeof sources;

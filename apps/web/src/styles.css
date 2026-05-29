@@ -1481,19 +1481,48 @@ thead th {
   margin-bottom: 0.75rem;
 }
 
+.queue-add-title {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+/* Inline create/edit form, styled as a card so it stands out from the list. */
+.inline-form-card {
+  margin-top: 1.25rem;
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid #2a3441;
+  border-radius: 8px;
+  background: #11171d;
+}
+
+.worker-run-form {
+  gap: 0.5rem;
+}
+
+.worker-run-form .queue-add-title {
+  margin-bottom: -0.2rem;
+}
+
 .queue-add-linkedin label {
   margin: 0;
 }
 
 .queue-add-row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
   align-items: end;
 }
 
 .queue-add-row label {
   margin: 0;
+}
+
+/* Toggle fields share a grid cell with inputs; nudge up to line up with input boxes. */
+.queue-add-row .evaluator-inline-field {
+  justify-content: flex-start;
+  padding-bottom: 0.4rem;
 }
 
 .queue-add-actions {
@@ -1522,6 +1551,10 @@ thead th {
   overflow: hidden;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+.history-trigger-chip-wrap {
+  margin-top: 0.25rem;
 }
 
 .select-cell {

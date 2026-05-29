@@ -31,6 +31,10 @@ export default defineSchema({
 
   scrape_runs: defineTable({
     evaluatorId: v.optional(v.id('job_evaluators')),
+    scheduleId: v.optional(v.id('worker_schedules')),
+    triggeredBy: v.optional(v.union(v.literal('manual'), v.literal('schedule'))),
+    /** Per-run ranking override. When absent, ranking remains enabled. */
+    enableRanking: v.optional(v.boolean()),
     source: v.string(),
     /**
      * Source-specific run criteria (validated by backend source contract).
@@ -71,6 +75,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index('by_status', ['status'])
+    .index('by_schedule_and_status', ['scheduleId', 'status'])
     .index('by_source_started_at', ['source', 'startedAt'])
     .index('by_started_at', ['startedAt']),
 
@@ -154,6 +159,45 @@ export default defineSchema({
   })
     .index('by_source_and_updated_at', ['source', 'updatedAt'])
     .index('by_source_and_name', ['source', 'name']),
+
+  /**
+   * User-defined recurring schedules that enqueue scrape runs in Convex.
+   */
+  worker_schedules: defineTable({
+    /**
+     * Legacy display name. No longer set on new rows; the UI derives a label
+     * from source + criteria + cadence. Kept optional for back-compat with
+     * existing rows.
+     */
+    name: v.optional(v.string()),
+    isEnabled: v.boolean(),
+    source: v.string(),
+    sourcePresetId: v.optional(v.id('source_presets')),
+    sourceCriteria: v.optional(v.record(v.string(), v.string())),
+    evaluatorId: v.optional(v.id('job_evaluators')),
+    /** Per-schedule ranking toggle; copied onto each queued run. */
+    enableRanking: v.boolean(),
+    schedule: v.union(
+      v.object({
+        kind: v.literal('daily'),
+        /** Local 24h time in `HH:mm` format. */
+        timeOfDay: v.string(),
+        timezone: v.string(),
+      }),
+      v.object({
+        kind: v.literal('interval'),
+        intervalHours: v.number(),
+      })
+    ),
+    nextRunAt: v.number(),
+    lastTriggeredAt: v.optional(v.number()),
+    lastRunId: v.optional(v.id('scrape_runs')),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('by_enabled_and_next_run', ['isEnabled', 'nextRunAt'])
+    .index('by_updated_at', ['updatedAt']),
 
   /**
    * LLM vendors for manual posting score (UI + scripts). `surface` tells the web app where execution runs.

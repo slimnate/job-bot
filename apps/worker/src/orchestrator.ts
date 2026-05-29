@@ -185,11 +185,6 @@ export class WorkerOrchestrator {
     this.inflightRunIds.delete(runIdKey(runId));
   }
 
-  async enqueueScheduledRuns(): Promise<void> {
-    /** Scheduled runs omit `evaluatorId`; each worker resolves ranking via `WORKER_DEFAULT_EVALUATOR_ID`. */
-    await this.triggerAndEnqueue({ source: 'linkedin' });
-  }
-
   queueSnapshot(): { queued: number; running: number } {
     return this.queue.snapshot();
   }
@@ -336,7 +331,8 @@ export class WorkerOrchestrator {
         });
 
         let rankedCount = 0;
-        if (this.enableLlmRanking) {
+        const rankThisRun = this.enableLlmRanking && (runDoc.enableRanking ?? true);
+        if (rankThisRun) {
           const sourceDefaultEvaluatorId = await this.runConvex(
             `sources.defaultEvaluator:${payload.source}`,
             () =>
@@ -428,7 +424,7 @@ export class WorkerOrchestrator {
             phase: 'ranking_skipped',
             runId: payload.runId,
             source: payload.source,
-            reason: 'WORKER_ENABLE_LLM_RANKING=0',
+            reason: this.enableLlmRanking ? 'run.enableRanking=false' : 'WORKER_ENABLE_LLM_RANKING=0',
           });
         }
 

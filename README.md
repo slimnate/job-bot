@@ -15,7 +15,10 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes (larger click targets), bulk `Score selected` / `Delete selected`, and `Clear All`
   - bulk score uses **fixed-size chunks** (default **3 postings** per LLM/CLI request); global rank is merged by `scoreOverall` after all chunks succeed
 - **View** modal loads `postings.getDetail` (full posting + latest ranking + raw JSON), including latest reasoning summary rendered as markdown
-- Workers (`/workers`) scheduler status (`WorkerSchedulerPanel` → reactive Convex `worker_scheduler_status`), queue + history (`apps/web/src/components/HistoryViewer.tsx`, `apps/web/src/components/ScrapeQueuePanel.tsx`) with:
+- Workers (`/workers`) scheduler status (`WorkerSchedulerPanel` → reactive Convex `worker_scheduler_status`) and a unified **queue + schedules** panel (`apps/web/src/components/WorkerQueuePanel.tsx`) plus history (`apps/web/src/components/HistoryViewer.tsx`) with:
+  - a single **Add run** form (`apps/web/src/components/WorkerRunDialog.tsx`, rendered inline above the list) with a One-time / Recurring toggle. One-time runs are **ephemeral**: they enqueue a `scrape_runs` row immediately (and best-effort wake the worker) without persisting a `worker_schedules` row, so they appear only as queued runs / history. Recurring runs persist a `worker_schedules` row that the Convex cron `tick` fires on cadence.
+  - there is no user-defined schedule name; a display label is **derived** from source + criteria + cadence (`formatRunLabel` in `apps/web/src/lib/formatSourceCriteria.ts`)
+  - the merged table lists recurring schedules and pending one-time runs together; per-row actions are Run now / Edit / Enable-Disable / Delete (recurring) and Trigger now / Edit / Remove (one-time)
   - status color coding (`queued` blue, `running` yellow, `succeeded` green, `failed`/`cancelled` red)
   - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
   - log detail modal with table-first view, **per-level filters** (debug / info / warn / error), and raw JSON
@@ -49,6 +52,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
 1. User creates or edits evaluator profiles in the web app (resume + evaluation prompt drive how the LLM ranks jobs; notes are for the user only).
 2. Runs are queued either:
    - manually from the dashboard (`runs.trigger`), optionally with an explicit `source`, `sourceCriteria`, and `evaluatorId`.
+   - automatically from recurring schedule rows (`worker_schedules`) via Convex cron (`schedules.tick`).
 3. Worker dequeues runs with bounded concurrency.
 4. Worker collects postings for a source (**LinkedIn**, **Remotive**, and **Greenhouse** implemented; other sources fail fast). **LinkedIn:** opens `/jobs/`, waits for a signed-in jobs UI (optional `LINKEDIN_USER` / `LINKEDIN_PASS` auto-login, or sign in manually in the Chrome window). When `sourceCriteria.search` is set, it runs a **UI-only** search on `/jobs/`: the SDUI typeahead receives `"<search> in <location>"` when location is also set, or just the search term when location is omitted. With empty `search`, the preferences hub path runs (“Show all”); `location` without `search` is ignored. The listing/detail scraper expands “About the job” when possible and persists the **full** job description with line breaks in `job_postings.descriptionSnippet`. LinkedIn scrape cleanup tears down Chrome after each run by default (`WORKER_AUTO_CLEANUP_CHROME=1`). **Remotive:** fetches public RSS feeds over HTTP (`https://remotive.com/remote-jobs/feed` when no categories are selected, or one feed per selected category slug). Queue criteria use comma-separated category slugs from the [Remotive category list](https://remotive.com/remote-jobs/rss-feed) (see `packages/shared/src/sources/remotiveCategories.ts`). Respect [Remotive’s RSS terms](https://remotive.com/remote-jobs/rss-feed): link back to listing URLs and mention Remotive as the source; do not repost to third-party job aggregators. Settings → **Remotive scraping**: `WORKER_REMOTIVE_MAX_POSTINGS` (optional cap) and `WORKER_REMOTIVE_FETCH_TIMEOUT_MS` (per-feed timeout; env overrides). **Greenhouse:** fetches the public [Job Board API](https://developers.greenhouse.io/job-board.html) (`GET https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs?content=true`) — no API key for reads. One company per run via required `boardToken`; optional client-side filters `keyword`, `department`, `office`, and `includeProspects` (`true` / `yes` / `1`). Prospect posts (`internal_job_id` null) are excluded unless `includeProspects` is set. `postedAt` is derived from Greenhouse `updated_at` (last update, not necessarily first publish). Salary ranges are not fetched in v1 (would require per-job detail calls with `pay_transparency=true`).
 5. Worker upserts postings in Convex (`postings.upsertBatch`).
@@ -72,7 +76,10 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `job_evaluators`: named evaluator profile (`name`, `isActive` = available for queue selection, optional `notes`, `resumeMarkdown`, `rankingPrompt`)
 - `job_sources`: source enablement metadata (`source`, `displayName`, `isEnabled`, optional `defaultEvaluatorId` for ranking when a run has no evaluator)
 - `source_presets`: reusable source criteria combinations (`source`, `name`, `sourceCriteria`)
+- `worker_schedules`: recurring run definitions (daily at wall-clock time in a timezone, or every X hours), including per-schedule ranking toggle and next run timestamp
 - `scrape_runs`: run status, timing, logs summary, aggregate stats
+- `scrape_runs.scheduleId` + `scrape_runs.triggeredBy`: optional linkage back to recurring schedules (`manual` vs `schedule` trigger)
+- `scrape_runs.enableRanking`: optional per-run ranking override copied from schedule-triggered rows
 - `scrape_runs.sourceCriteria`: source-specific run criteria payload (LinkedIn: optional `search`; optional `location` only when `search` is set; Remotive: optional comma-separated `categories` slugs — empty → all-jobs feed; Greenhouse: required `boardToken`, optional `keyword`, `department`, `office`, `includeProspects`)
 - `scrape_runs.linkedinSearchStrategy`: records LinkedIn search path (`ui` for criteria-driven search, `preferences_hub` when criteria are empty; legacy runs may still show `search_url` / `url_fallback`)
 - `scrape_runs.usedLinkedinUrlFallback`: boolean warning flag for URL fallback usage
@@ -107,6 +114,13 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.sourcePresets.create`
 - `api.sourcePresets.update`
 - `api.sourcePresets.remove`
+- `api.schedules.list`
+- `api.schedules.get`
+- `api.schedules.create`
+- `api.schedules.update`
+- `api.schedules.setEnabled`
+- `api.schedules.runNow`
+- `api.schedules.remove`
 - `api.postings.list` (legacy full scan; prefer `listPage` for the UI)
 - `api.postings.listPage` (paginated preview rows — see field contract below)
 - `api.postings.listPageCount` (filtered row count for page X of Y)
@@ -224,8 +238,9 @@ Stored postings include `rawPayload.extractionDiagnostics` (`salarySource`, `has
 - `WORKER_DEFAULT_EVALUATOR_ID` (optional): Convex document id for `job_evaluators` used when a scrape run has no `evaluatorId` **and** the source has no `defaultEvaluatorId`. Set on each worker host (e.g. in `.env.local`). If unset after those checks, ranking still runs but with an empty evaluator profile (and the worker logs a warning). The id must point to a row that exists and has **Active** on if you want full profile context in the ranker.
 - `WORKER_ENABLE_LLM_RANKING` (default: `true`; set `0` during testing to skip post-scrape LLM ranking and complete runs with `rankedCount=0`)
 - `WORKER_QUEUE_CONCURRENCY` (default: `2`): multiple sources can run in parallel, but **LinkedIn scrapes are serialized** in the worker (one shared Chrome tab/CDP session) so two LinkedIn jobs never navigate at once.
-- `WORKER_CRON_INTERVAL_MINUTES` (default: `15`)
-- `WORKER_RUN_ON_START` (default: `true`): controls whether the scheduler immediately checks for already queued runs on worker boot; it does **not** auto-create new scrape runs.
+- `WORKER_CRON_INTERVAL_MINUTES` (default: `15`): worker dequeue polling interval for existing queued rows in Convex.
+- `WORKER_RUN_ON_START` (default: `true`): controls whether the worker immediately checks for already queued runs on boot.
+- Recurring schedule creation is handled separately by Convex cron (`convex/crons.ts` -> `internal.schedules.tick` every minute), which enqueues new runs into `scrape_runs`.
 - `TRIGGER_LINKEDIN_RUN_TIMEOUT_MS` (optional): max time in milliseconds that `npm run trigger:linkedin` polls Convex for the LinkedIn run to finish (default **45 minutes**).
 - `LLM_RANKING_PROVIDER` (default: `cursor`; options: `cursor`, `http`)
 - `LLM_RANKING_MODEL` (HTTP OpenAI model; optional fallback for Cursor if `LLM_RANKING_CURSOR_MODEL` unset)

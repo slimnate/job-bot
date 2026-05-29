@@ -8,6 +8,9 @@ Add ability to archive postings, and a page to view archived postings. I may wan
 
 Notifications
 
+Optimize README for human consumption
+
+"Ask bout this job" feature. On postings page, provide a question input box that the user can use to ask a question about the posting. Let's hide it by default behind some sort of button. Save the history of asked questions and answers. Make the button that shows the question dialog box and history show the user if there is any previous question history (show number of questions asked)
 
 
 on the workers page queue dialog, lets show the user what the default evaluator for the source is in the dropdown.

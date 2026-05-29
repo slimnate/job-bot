@@ -1,9 +1,10 @@
-import { mutation, query } from './_generated/server.js';
+import { internalMutation, mutation, query } from './_generated/server.js';
 import { api } from './_generated/api.js';
 import { v } from 'convex/values';
 import { normalizeSourceCriteria, sourceDefinitions, sourceKeyValidator } from './sourceContract.js';
 
 import type { Doc, Id } from './_generated/dataModel.js';
+import type { MutationCtx } from './_generated/server.js';
 
 const statsValidator = v.object({
   discoveredCount: v.number(),
@@ -12,6 +13,74 @@ const statsValidator = v.object({
   rankedCount: v.number(),
   errorCount: v.number(),
 });
+
+type TriggeredBy = 'manual' | 'schedule';
+
+/**
+ * Resolves a run evaluator and enforces that selected evaluators remain active.
+ */
+async function resolveRunEvaluator(
+  ctx: MutationCtx,
+  evaluatorId: Id<'job_evaluators'> | undefined
+): Promise<Doc<'job_evaluators'> | null> {
+  if (!evaluatorId) {
+    return null;
+  }
+  const row = await ctx.db.get(evaluatorId);
+  if (!row) {
+    throw new Error('Evaluator not found.');
+  }
+  if (!row.isActive) {
+    throw new Error(
+      'That evaluator is not available for worker runs (turn on Active on the Evaluators page), or clear evaluator to use this worker’s default.'
+    );
+  }
+  return row;
+}
+
+/**
+ * Inserts one queued scrape run after validating source config and criteria.
+ */
+async function insertQueuedRun(
+  ctx: MutationCtx,
+  args: {
+    source: string;
+    sourceCriteria?: Record<string, string | null>;
+    evaluatorId?: Id<'job_evaluators'>;
+    scheduleId?: Id<'worker_schedules'>;
+    triggeredBy: TriggeredBy;
+    enableRanking?: boolean;
+    now: number;
+  }
+): Promise<Id<'scrape_runs'>> {
+  const source = args.source.trim().toLowerCase();
+  if (!sourceDefinitions[source as keyof typeof sourceDefinitions]) {
+    throw new Error(`Unsupported source '${source}'.`);
+  }
+  const sourceConfig = await ctx.db
+    .query('job_sources')
+    .withIndex('by_source', (q) => q.eq('source', source))
+    .unique();
+  if (sourceConfig && !sourceConfig.isEnabled) {
+    throw new Error(`Source '${source}' is disabled.`);
+  }
+
+  const evaluatorForRun = await resolveRunEvaluator(ctx, args.evaluatorId);
+  const normalizedCriteria = normalizeSourceCriteria(source, args.sourceCriteria);
+
+  return await ctx.db.insert('scrape_runs', {
+    evaluatorId: evaluatorForRun?._id,
+    scheduleId: args.scheduleId,
+    triggeredBy: args.triggeredBy,
+    enableRanking: args.enableRanking,
+    source,
+    sourceCriteria: Object.keys(normalizedCriteria).length > 0 ? normalizedCriteria : undefined,
+    status: 'queued',
+    startedAt: args.now,
+    createdAt: args.now,
+    updatedAt: args.now,
+  });
+}
 
 export const list = query({
   args: {
@@ -60,20 +129,7 @@ export const trigger = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-
-    let evaluatorForRun: Doc<'job_evaluators'> | null = null;
-    if (args.evaluatorId) {
-      const row = await ctx.db.get(args.evaluatorId);
-      if (!row) {
-        throw new Error('Evaluator not found.');
-      }
-      if (!row.isActive) {
-        throw new Error(
-          'That evaluator is not available for worker runs (turn on Active on the Evaluators page), or clear evaluator to use this worker’s default.'
-        );
-      }
-      evaluatorForRun = row;
-    }
+    const evaluatorForRun = await resolveRunEvaluator(ctx, args.evaluatorId);
 
     const resolvedSources = args.source ? [args.source.trim().toLowerCase()] : ['linkedin'];
 
@@ -81,25 +137,12 @@ export const trigger = mutation({
     const runIds: Id<'scrape_runs'>[] = [];
 
     for (const source of resolvedSources) {
-      if (!sourceDefinitions[source as keyof typeof sourceDefinitions]) {
-        throw new Error(`Unsupported source '${source}'.`);
-      }
-      const sourceConfig = await ctx.db
-        .query('job_sources')
-        .withIndex('by_source', (q) => q.eq('source', source))
-        .unique();
-      if (sourceConfig && !sourceConfig.isEnabled) {
-        throw new Error(`Source '${source}' is disabled.`);
-      }
-      const normalizedCriteria = normalizeSourceCriteria(source, args.sourceCriteria);
-      const runId = await ctx.db.insert('scrape_runs', {
-        evaluatorId: evaluatorForRun?._id,
+      const runId = await insertQueuedRun(ctx, {
         source,
-        sourceCriteria: Object.keys(normalizedCriteria).length > 0 ? normalizedCriteria : undefined,
-        status: 'queued',
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
+        sourceCriteria: args.sourceCriteria,
+        evaluatorId: evaluatorForRun?._id,
+        triggeredBy: 'manual',
+        now,
       });
       runIds.push(runId);
       triggerRuns.push({ runId, source });
@@ -113,12 +156,65 @@ export const trigger = mutation({
   },
 });
 
+/**
+ * Internal enqueue path used by recurring schedules.
+ */
+export const triggerFromSchedule = internalMutation({
+  args: {
+    scheduleId: v.id('worker_schedules'),
+    evaluatorId: v.optional(v.id('job_evaluators')),
+    source: sourceKeyValidator,
+    sourceCriteria: v.optional(v.record(v.string(), v.union(v.string(), v.null()))),
+    enableRanking: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const runId = await insertQueuedRun(ctx, {
+      source: args.source,
+      sourceCriteria: args.sourceCriteria,
+      evaluatorId: args.evaluatorId,
+      scheduleId: args.scheduleId,
+      triggeredBy: 'schedule',
+      enableRanking: args.enableRanking,
+      now,
+    });
+    return { runId, source: args.source };
+  },
+});
+
+/**
+ * Internal enqueue path for one-time runs created through the unified run dialog.
+ * Inserts a single queued `scrape_runs` row tagged `manual` (no schedule row is
+ * persisted) and carries the per-run ranking override from the dialog.
+ */
+export const enqueueOneTime = internalMutation({
+  args: {
+    evaluatorId: v.optional(v.id('job_evaluators')),
+    source: sourceKeyValidator,
+    sourceCriteria: v.optional(v.record(v.string(), v.union(v.string(), v.null()))),
+    enableRanking: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const runId = await insertQueuedRun(ctx, {
+      source: args.source,
+      sourceCriteria: args.sourceCriteria,
+      evaluatorId: args.evaluatorId,
+      triggeredBy: 'manual',
+      enableRanking: args.enableRanking,
+      now,
+    });
+    return { runId, source: args.source };
+  },
+});
+
 export const updateQueued = mutation({
   args: {
     runId: v.id('scrape_runs'),
     source: v.optional(v.string()),
     evaluatorId: v.optional(v.union(v.id('job_evaluators'), v.null())),
     sourceCriteria: v.optional(v.record(v.string(), v.union(v.string(), v.null()))),
+    enableRanking: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const run = await ctx.db.get(args.runId);
@@ -131,7 +227,8 @@ export const updateQueued = mutation({
     if (
       args.source === undefined &&
       args.evaluatorId === undefined &&
-      args.sourceCriteria === undefined
+      args.sourceCriteria === undefined &&
+      args.enableRanking === undefined
     ) {
       return;
     }
@@ -141,8 +238,13 @@ export const updateQueued = mutation({
       source?: string;
       evaluatorId?: typeof run.evaluatorId;
       sourceCriteria?: Record<string, string> | undefined;
+      enableRanking?: boolean;
       updatedAt: number;
     } = { updatedAt: now };
+
+    if (args.enableRanking !== undefined) {
+      patch.enableRanking = args.enableRanking;
+    }
 
     if (args.source !== undefined) {
       const trimmed = args.source.trim();

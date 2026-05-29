@@ -4,7 +4,8 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 import { formatHumanizedTime } from '../lib/time';
-import { ScrapeQueuePanel } from './ScrapeQueuePanel';
+import { formatRunLabel } from '../lib/formatSourceCriteria';
+import { WorkerQueuePanel } from './WorkerQueuePanel';
 import { WorkerSchedulerPanel } from './WorkerSchedulerPanel';
 
 type RunStatus = '' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -156,7 +157,6 @@ function parsedLogLevelForFilter(parsed: Record<string, unknown> | null): LogLev
 }
 
 export function HistoryViewer() {
-  const triggerRun = useMutation(api.runs.trigger);
   const updateStatus = useMutation(api.runs.updateStatus);
   const requestGracefulStop = useMutation(api.runs.requestGracefulStop);
   const deleteRunWithLogs = useMutation(api.runs.deleteRunWithLogs);
@@ -165,8 +165,7 @@ export function HistoryViewer() {
   const [runSourceFilter, setRunSourceFilter] = useState('');
   const [runStatusFilter, setRunStatusFilter] = useState<RunStatus>('');
   const [runSearchPathFilter, setRunSearchPathFilter] = useState<SearchPathFilter>('');
-  const [triggerMessage, setTriggerMessage] = useState('');
-  const [isTriggeringRun, setIsTriggeringRun] = useState(false);
+  const [historyMessage, setHistoryMessage] = useState('');
   const [selectedRunId, setSelectedRunId] = useState<Id<'scrape_runs'> | null>(null);
   const [logLevelFilter, setLogLevelFilter] = useState(defaultLogLevelFilter);
   const [actionBusyRunId, setActionBusyRunId] = useState<Id<'scrape_runs'> | null>(null);
@@ -177,6 +176,22 @@ export function HistoryViewer() {
     status: runStatusFilter || undefined,
     limit: 50,
   });
+  const schedules = useQuery(api.schedules.list, {});
+  const scheduleNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of schedules ?? []) {
+      map.set(
+        row._id,
+        row.name ??
+          formatRunLabel({
+            source: row.source,
+            sourceCriteria: row.sourceCriteria,
+            schedule: row.schedule,
+          })
+      );
+    }
+    return map;
+  }, [schedules]);
 
   const runSources = useMemo(() => {
     if (!runs) {
@@ -226,21 +241,6 @@ export function HistoryViewer() {
     });
   }, [runs, runSearchPathFilter]);
 
-  const onTriggerRun = async () => {
-    setIsTriggeringRun(true);
-    setTriggerMessage('');
-    try {
-      const result = await triggerRun({});
-      setTriggerMessage(`Queued ${result.runIds.length} run(s).`);
-    } catch (error) {
-      setTriggerMessage(
-        error instanceof Error ? `Run trigger failed: ${error.message}` : 'Run trigger failed.'
-      );
-    } finally {
-      setIsTriggeringRun(false);
-    }
-  };
-
   const onStopRun = async (run: Doc<'scrape_runs'>) => {
     if (run.status !== 'queued' && run.status !== 'running') {
       return;
@@ -256,7 +256,7 @@ export function HistoryViewer() {
     }
 
     setActionBusyRunId(run._id);
-    setTriggerMessage('');
+    setHistoryMessage('');
     try {
       if (run.status === 'queued') {
         await updateStatus({
@@ -265,13 +265,13 @@ export function HistoryViewer() {
           endedAt: Date.now(),
           logsSummary: 'Cancelled from Workers history.',
         });
-        setTriggerMessage('Queued run cancelled.');
+        setHistoryMessage('Queued run cancelled.');
       } else {
         await requestGracefulStop({ runId: run._id });
-        setTriggerMessage('Graceful stop requested. Run will finish current pipeline first.');
+        setHistoryMessage('Graceful stop requested. Run will finish current pipeline first.');
       }
     } catch (error) {
-      setTriggerMessage(
+      setHistoryMessage(
         error instanceof Error ? `Stop action failed: ${error.message}` : 'Stop action failed.'
       );
     } finally {
@@ -286,15 +286,15 @@ export function HistoryViewer() {
     }
 
     setActionBusyRunId(run._id);
-    setTriggerMessage('');
+    setHistoryMessage('');
     try {
       const result = await deleteRunWithLogs({ runId: run._id });
-      setTriggerMessage(`Deleted run and ${result.deletedLogs} log line(s).`);
+      setHistoryMessage(`Deleted run and ${result.deletedLogs} log line(s).`);
       if (selectedRunId === run._id) {
         setSelectedRunId(null);
       }
     } catch (error) {
-      setTriggerMessage(
+      setHistoryMessage(
         error instanceof Error ? `Delete failed: ${error.message}` : 'Delete failed.'
       );
     } finally {
@@ -309,16 +309,16 @@ export function HistoryViewer() {
     }
 
     setIsClearingHistory(true);
-    setTriggerMessage('');
+    setHistoryMessage('');
     try {
       const result = await clearAllRunsAndLogs({});
       setSelectedRunId(null);
-      setTriggerMessage(
+      setHistoryMessage(
         `Cleared ${result.deletedRuns} run(s) and ${result.deletedLogs} log line(s).` +
           (result.hasMore ? ' Additional cleanup is scheduled in the background.' : '')
       );
     } catch (error) {
-      setTriggerMessage(
+      setHistoryMessage(
         error instanceof Error ? `Clear all failed: ${error.message}` : 'Clear all failed.'
       );
     } finally {
@@ -352,14 +352,11 @@ export function HistoryViewer() {
   return (
     <>
       <WorkerSchedulerPanel />
-      <ScrapeQueuePanel />
+      <WorkerQueuePanel />
       <section className='panel'>
         <div className='panel-heading'>
           <h2>History</h2>
           <div className='queue-actions-cell'>
-            <button onClick={onTriggerRun} disabled={isTriggeringRun || isClearingHistory}>
-              {isTriggeringRun ? 'Triggering…' : 'Trigger run'}
-            </button>
             <button
               type='button'
               className='btn-danger'
@@ -370,7 +367,7 @@ export function HistoryViewer() {
             </button>
           </div>
         </div>
-        {triggerMessage ? <p className='status-text'>{triggerMessage}</p> : null}
+        {historyMessage ? <p className='status-text'>{historyMessage}</p> : null}
         <div className='filters'>
           <select value={runSourceFilter} onChange={(event) => setRunSourceFilter(event.target.value)}>
             <option value=''>All sources</option>
@@ -406,8 +403,7 @@ export function HistoryViewer() {
                 <th>Status</th>
                 <th>Source</th>
                 <th>Search path</th>
-                <th className='timestamp-cell'>Started</th>
-                <th className='timestamp-cell'>Ended</th>
+                <th className='timestamp-cell'>Completed</th>
                 <th>Duration</th>
                 <th>Stats</th>
                 <th>Error</th>
@@ -421,7 +417,24 @@ export function HistoryViewer() {
                     <td>
                       <span className={`status-badge status-${run.status}`}>{run.status}</span>
                     </td>
-                    <td>{run.source}</td>
+                    <td>
+                      {run.source}
+                      {(run as Doc<'scrape_runs'> & { triggeredBy?: string }).triggeredBy === 'schedule' ? (
+                        <div className='history-trigger-chip-wrap'>
+                          <span className='status-badge scheduler-timer-off'>
+                            scheduled
+                            {(run as Doc<'scrape_runs'> & { scheduleId?: Id<'worker_schedules'> }).scheduleId
+                              ? `: ${
+                                  scheduleNameById.get(
+                                    (run as Doc<'scrape_runs'> & { scheduleId?: Id<'worker_schedules'> })
+                                      .scheduleId as string
+                                  ) ?? 'unknown'
+                                }`
+                              : ''}
+                          </span>
+                        </div>
+                      ) : null}
+                    </td>
                     <td>
                       {linkedinSearchBadge(run) === 'URL fallback used' ? (
                         <span className='status-badge status-running'>{linkedinSearchBadge(run)}</span>
@@ -429,7 +442,6 @@ export function HistoryViewer() {
                         linkedinSearchBadge(run)
                       )}
                     </td>
-                    <td className='timestamp-cell'>{formatHumanizedTime(run.startedAt)}</td>
                     <td className='timestamp-cell'>{formatHumanizedTime(run.endedAt)}</td>
                     <td>{formatRunDuration(run.startedAt, run.endedAt)}</td>
                     <td>
@@ -473,7 +485,7 @@ export function HistoryViewer() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9}>No runs recorded yet.</td>
+                  <td colSpan={8}>No runs recorded yet.</td>
                 </tr>
               )}
             </tbody>
