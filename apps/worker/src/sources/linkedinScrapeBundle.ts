@@ -306,7 +306,7 @@ export function buildLinkedInJobsListScrapeExpression(
             const canonicalUrl = 'https://www.linkedin.com/jobs/view/' + jobId + '/';
             const rawDescription = details.description !== na ? details.description : '';
             const descriptionStored = rawDescription.trim()
-              ? clipDescriptionForStorage(li.normalizeMultiline(rawDescription))
+              ? clipDescriptionForStorage(li.normalizeDescriptionMarkdown(rawDescription))
               : '';
 
             const salaryTextOut = details.salary !== na ? details.salary : undefined;

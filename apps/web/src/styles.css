@@ -1105,7 +1105,57 @@ label.posting-list-select-all input {
   word-break: break-word;
 }
 
+.posting-item__description-md {
+  font-size: inherit;
+  color: inherit;
+  line-height: inherit;
+}
+
+.posting-item__description-md > :first-child {
+  margin-top: 0;
+}
+
+.posting-item__description-md > :last-child {
+  margin-bottom: 0;
+}
+
+.posting-item__description-md p,
+.posting-item__description-md li {
+  margin: 0.35em 0;
+  word-break: break-word;
+}
+
+.posting-item__description-md ul,
+.posting-item__description-md ol {
+  margin: 0.35em 0;
+  padding-left: 1.25rem;
+}
+
 /* Long snippets: clamp the preview until the user expands */
+.posting-item__description--expandable:not(.posting-item__description--expanded) .posting-item__description-md {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.posting-item__description:not(.posting-item__description--expandable) .posting-item__description-md,
+.posting-item__description--expanded .posting-item__description-md {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.posting-item__description--expanded .posting-item__description-md {
+  max-height: 28rem;
+  overflow-y: auto;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+/* Legacy plain-text descriptions (pre-markdown scrapes) */
 .posting-item__description--expandable:not(.posting-item__description--expanded) .posting-item__description-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;

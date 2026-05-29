@@ -63,6 +63,14 @@ type PostingDescriptionProps = {
 };
 
 /**
+ * LinkedIn descriptions scraped after the markdown change use **bold** and `-` lists.
+ * Older plain-text rows keep pre-wrap rendering.
+ */
+function looksLikeStoredMarkdown(text: string): boolean {
+  return /(\*\*.+\*\*|^-\s+.)/m.test(text);
+}
+
+/**
  * List description with lazy fetch when the server-truncated snippet is expanded.
  */
 function PostingDescription({ postingId, descriptionSnippet }: PostingDescriptionProps) {
@@ -95,7 +103,15 @@ function PostingDescription({ postingId, descriptionSnippet }: PostingDescriptio
 
   return (
     <div className={wrapperClass}>
-      <p className='posting-item__description-text'>{displayText}</p>
+      {looksLikeStoredMarkdown(displayText) ? (
+        <MarkdownContent
+          value={displayText === '-' ? null : displayText}
+          className='posting-item__description-md'
+          emptyFallback='-'
+        />
+      ) : (
+        <p className='posting-item__description-text'>{displayText}</p>
+      )}
       {isTruncated ? (
         <button
           type='button'
@@ -369,7 +385,12 @@ function ViewPostingModal({ postingId, title, onClose }: ViewPostingModalProps) 
                 <dt>Salary</dt>
                 <dd>{posting.salaryText ?? '-'}</dd>
                 <dt>Description</dt>
-                <dd className='details-grid__description-full'>{posting.descriptionSnippet ?? '-'}</dd>
+                <dd className='details-grid__description-full'>
+                  <MarkdownContent
+                    value={posting.descriptionSnippet}
+                    className='details-grid__markdown'
+                  />
+                </dd>
               </dl>
               <details>
                 <summary>Raw JSON</summary>

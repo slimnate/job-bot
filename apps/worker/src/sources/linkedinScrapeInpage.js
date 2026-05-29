@@ -22,6 +22,185 @@
       .join('\n');
   }
 
+  /** Trims markdown description output without collapsing intentional blank lines. */
+  function normalizeDescriptionMarkdown(value) {
+    if (!value) return '';
+    return String(value)
+      .replace(/\r/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function isBoldElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'strong' || tag === 'b') return true;
+    try {
+      const view = el.ownerDocument?.defaultView;
+      if (!view) return false;
+      const fw = view.getComputedStyle(el).fontWeight;
+      if (!fw) return false;
+      const weight = parseInt(fw, 10);
+      return fw === 'bold' || (!Number.isNaN(weight) && weight >= 600);
+    } catch {
+      return false;
+    }
+  }
+
+  function inlineChildrenToMarkdown(node) {
+    if (!node) return '';
+    const parts = [];
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === 3) {
+        const text = String(child.textContent || '').replace(/\u00a0/g, ' ');
+        if (text) parts.push(text);
+        return;
+      }
+      if (child.nodeType !== 1) return;
+      const tag = child.tagName.toLowerCase();
+      if (tag === 'br') {
+        parts.push('\n');
+        return;
+      }
+      if (tag === 'strong' || tag === 'b' || isBoldElement(child)) {
+        const inner = normalizeInline(inlineChildrenToMarkdown(child));
+        if (inner) parts.push('**' + inner + '**');
+        return;
+      }
+      if (tag === 'em' || tag === 'i') {
+        const inner = normalizeInline(inlineChildrenToMarkdown(child));
+        if (inner) parts.push('*' + inner + '*');
+        return;
+      }
+      parts.push(inlineChildrenToMarkdown(child));
+    });
+    return parts.join('');
+  }
+
+  function blockElementToMarkdown(el) {
+    if (!el || el.nodeType !== 1) return '';
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'ul' || (tag === 'div' && el.getAttribute('role') === 'list')) {
+      const items = Array.from(el.children).filter(
+        (child) =>
+          child.nodeType === 1 &&
+          (child.tagName.toLowerCase() === 'li' || child.getAttribute('role') === 'listitem')
+      );
+      if (items.length > 0) {
+        return items
+          .map((item) => {
+            const text = normalizeInline(inlineChildrenToMarkdown(item));
+            return text ? '- ' + text : '';
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+    }
+    if (tag === 'li' || el.getAttribute('role') === 'listitem') {
+      const text = normalizeInline(inlineChildrenToMarkdown(el));
+      return text ? '- ' + text : '';
+    }
+    if (/^h[1-6]$/.test(tag)) {
+      const text = normalizeInline(inlineChildrenToMarkdown(el));
+      return text ? '**' + text + '**' : '';
+    }
+    return normalizeInline(inlineChildrenToMarkdown(el));
+  }
+
+  function isStandaloneHeadingBlock(el, text) {
+    if (!text) return false;
+    const trimmed = text.trim();
+    if (trimmed.length > 80) return false;
+    const tag = el.tagName.toLowerCase();
+    if (/^h[1-6]$/.test(tag)) return true;
+    if (tag === 'strong' || tag === 'b' || isBoldElement(el)) return true;
+    const strongOnly =
+      el.querySelector('strong, b') &&
+      normalizeInline(el.querySelector('strong, b')?.textContent || '') === trimmed;
+    if (strongOnly) return true;
+    return /^(about .+|benefits:?|requirements:?|qualifications:?|responsibilities:?|what you.+)$/i.test(
+      trimmed
+    );
+  }
+
+  function isListSectionHeading(text) {
+    const normalized = normalizeInline(text).replace(/:$/, '');
+    return /^(about the role|responsibilities|what you.+ do|requirements|qualifications|benefits)$/i.test(
+      normalized
+    );
+  }
+
+  function findDescriptionContentRoot(node) {
+    if (!node) return null;
+    let current = node;
+    for (let depth = 0; depth < 4 && current; depth += 1) {
+      const children = Array.from(current.children).filter((child) =>
+        normalizeInline(child.textContent || '')
+      );
+      if (children.length > 1) return current;
+      if (children.length === 1) {
+        current = children[0];
+        continue;
+      }
+      break;
+    }
+    return node;
+  }
+
+  /**
+   * Converts LinkedIn description DOM to markdown (headings, bullets, bold) without innerText soft wraps.
+   */
+  function descriptionElementToMarkdown(rootEl) {
+    if (!rootEl) return '';
+    const contentRoot = findDescriptionContentRoot(rootEl);
+    const blockElements = Array.from(contentRoot.children).filter((child) =>
+      normalizeInline(child.textContent || '')
+    );
+    const lines = [];
+    let listMode = false;
+
+    const pushBlock = (markdown) => {
+      const trimmed = (markdown || '').trim();
+      if (trimmed) lines.push(trimmed);
+    };
+
+    if (blockElements.length === 0) {
+      const fallback = blockElementToMarkdown(contentRoot);
+      return fallback ? normalizeDescriptionMarkdown(fallback) : '';
+    }
+
+    for (const el of blockElements) {
+      const plainText = normalizeInline(el.textContent || '');
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'ul' || tag === 'ol' || (tag === 'div' && el.getAttribute('role') === 'list')) {
+        listMode = false;
+        pushBlock(blockElementToMarkdown(el));
+        continue;
+      }
+
+      if (isStandaloneHeadingBlock(el, plainText)) {
+        listMode = isListSectionHeading(plainText);
+        const heading = plainText.replace(/:$/, '');
+        pushBlock('**' + heading + (plainText.endsWith(':') ? ':**' : '**'));
+        continue;
+      }
+
+      const markdown = blockElementToMarkdown(el);
+      const trimmed = markdown.trim();
+      if (!trimmed) continue;
+
+      if (listMode && !trimmed.includes('\n\n')) {
+        pushBlock(trimmed.startsWith('- ') ? trimmed : '- ' + trimmed);
+        continue;
+      }
+
+      listMode = false;
+      pushBlock(trimmed);
+    }
+
+    return normalizeDescriptionMarkdown(lines.join('\n\n'));
+  }
+
   function getCurrentJobId(win) {
     const searchParams = new URLSearchParams(win.location.search);
     const fromQuery = searchParams.get('currentJobId');
@@ -187,7 +366,10 @@
     for (const root of searchRoots) {
       for (const selector of descriptionSelectors) {
         const node = root.querySelector(selector);
-        const text = normalizeMultiline(node?.innerText || node?.textContent || '');
+        if (!node) continue;
+        const markdown = descriptionElementToMarkdown(node);
+        if (markdown) return markdown;
+        const text = normalizeMultiline(node.innerText || node.textContent || '');
         if (text) return text;
       }
     }
@@ -199,6 +381,10 @@
       const container =
         aboutHeading.closest('div[componentkey], div[data-sdui-component], section, div') ||
         aboutHeading.parentElement;
+      if (container) {
+        const markdown = descriptionElementToMarkdown(container);
+        if (markdown) return markdown;
+      }
       const text = normalizeMultiline(container?.innerText || container?.textContent || '');
       if (text) return text;
     }
@@ -273,16 +459,19 @@
 
   /**
    * Salary from free text (description / legal pay disclosure). Returns null if none.
+   * Handles compact ranges like "$90,000-120,000 base salary" where only the low bound has "$".
    */
   function findSalaryInText(descriptionText) {
     const joined = normalizeInline(descriptionText);
     if (!joined) return null;
     const salaryPatterns = [
       /Pay Range:\s*:?\s*:?[^\$]{0,40}\$\s?\d{1,3}(?:,\d{3})*(?:\s*USD)?\s*-\s*\$\s?\d{1,3}(?:,\d{3})*(?:\s*USD)?/i,
+      /\$\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?\s*-\s*(?:\$?\s?)?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:\s*(?:base salary|salary range|compensation|annually|yearly|per year|\/yr|\/year|plus equity))?/i,
       /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*-\s*\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*(?:annually|yearly|per year|\/yr|\/year)/i,
       /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[A-Za-z]{2,4})?\s*-\s*\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*[A-Za-z]{2,4})?/i,
+      /\$\s?\d{2,3}K\s*-\s*(?:\$?\s?)?\d{2,3}K(?:\s*\/\s*\w+)?/i,
       /\$\s?\d{2,3}K\s*-\s*\$\s?\d{2,3}K(?:\s*\/\s*\w+)?/i,
-      /base salary range[^.]{0,160}\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?[^.]{0,80}\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?/i,
+      /base salary(?: range)?[^.]{0,160}\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?[^.]{0,80}\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?/i,
     ];
     for (const pattern of salaryPatterns) {
       const match = joined.match(pattern);
@@ -408,6 +597,8 @@
     na,
     normalizeInline,
     normalizeMultiline,
+    normalizeDescriptionMarkdown,
+    descriptionElementToMarkdown,
     getCurrentJobId,
     extractJobIdFromHref,
     buildCanonicalJobLink,
