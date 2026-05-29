@@ -13,5 +13,7 @@ export * from './ranking/rankingCursorBatch.js';
 export * from './ranking/cursorCliCatalog.js';
 export * from './postingQa/postingQaSystemMessage.js';
 export * from './postingQa/buildPostingQaPrompt.js';
+export * from './coverLetter/coverLetterOutlineSystemMessage.js';
+export * from './coverLetter/buildCoverLetterOutlinePrompt.js';
 
 export const sharedVersion = 'shared-v1';

@@ -6,6 +6,7 @@ import { handleIngestPostingRequest } from './workerIngestPostingHandler.js';
 import { handleAskRunLogStreamRequest } from './ranking/askRunLogStream.js';
 import { handleRankRunLogStreamRequest } from './ranking/rankRunLogStream.js';
 import { handleAskPostingRequest } from './workerAskPostingHandler.js';
+import { handleCoverLetterOutlineRequest } from './workerCoverLetterHandler.js';
 import { handleRankPostingRequest, handleRankPostingsRequest } from './workerRankPostingHandler.js';
 
 const corsTrigger: Record<string, string> = {
@@ -23,7 +24,7 @@ const corsJson: Record<string, string> = {
  * Local-only HTTP trigger: `GET /scheduler` returns scheduler JSON; `POST /trigger` runs one scheduler tick;
  * `POST /rank-posting` scores one posting and `POST /rank-postings` scores multiple postings in one batch via Cursor CLI;
  * `GET /rank-logs?rankingRunId=…` streams `llm.rank.*` logs for a scoring run (SSE, used by the Postings score dialog);
- * `POST /ask-posting` answers a question about one posting via Cursor CLI;
+ * `POST /cover-letter-outline` generates or revises a cover letter outline for one posting via Cursor CLI;
  * `GET /ask-logs?askRunId=…` streams `llm.ask.*` logs for a Q&A run (SSE, Postings Ask panel);
  * `POST /ingest-posting` upserts captured job postings (e.g. from the oc-job-capture browser extension).
  * Binds `127.0.0.1` only.
@@ -41,6 +42,7 @@ export function startWorkerTriggerServer(
         req.url === '/rank-posting' ||
         req.url === '/rank-postings' ||
         req.url === '/ask-posting' ||
+        req.url === '/cover-letter-outline' ||
         req.url === '/ingest-posting' ||
         req.url?.startsWith('/rank-logs') ||
         req.url?.startsWith('/ask-logs'))
@@ -81,6 +83,10 @@ export function startWorkerTriggerServer(
       handleAskRunLogStreamRequest(req, res);
       return;
     }
+    if (req.method === 'POST' && req.url === '/cover-letter-outline') {
+      void handleCoverLetterOutlineRequest({ convexUrl: options.convexUrl, req, res });
+      return;
+    }
     if (req.method === 'POST' && req.url === '/ask-posting') {
       void handleAskPostingRequest({ convexUrl: options.convexUrl, req, res });
       return;
@@ -111,6 +117,7 @@ export function startWorkerTriggerServer(
         '/rank-postings',
         '/rank-logs',
         '/ask-posting',
+        '/cover-letter-outline',
         '/ask-logs',
         '/ingest-posting',
       ],

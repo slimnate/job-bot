@@ -2,7 +2,7 @@ import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { dimensionScoresPartialValidator } from './rankingValidators.js';
 
-export const schemaVersion = 'posting_questions';
+export const schemaVersion = 'posting_cover_letter_revised_from';
 
 export default defineSchema({
   job_evaluators: defineTable({
@@ -144,6 +144,26 @@ export default defineSchema({
     model: v.string(),
     status: v.union(v.literal('completed'), v.literal('failed')),
     errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index('by_posting_created_at', ['postingId', 'createdAt']),
+
+  /**
+   * Per-posting cover letter outline versions from the Postings page Cover letter panel.
+   */
+  posting_cover_letter_outlines: defineTable({
+    postingId: v.id('job_postings'),
+    /** User prompt for this version — initial instructions or a revision request. */
+    userMessage: v.string(),
+    /** Generated or revised outline markdown. */
+    outline: v.string(),
+    /** Catalog provider key, e.g. `openai`, `cursor`. */
+    providerKey: v.string(),
+    /** API / CLI model id passed to the provider. */
+    model: v.string(),
+    status: v.union(v.literal('completed'), v.literal('failed')),
+    errorMessage: v.optional(v.string()),
+    /** When set, this version revises the linked parent outline. */
+    revisedFromId: v.optional(v.id('posting_cover_letter_outlines')),
     createdAt: v.number(),
   }).index('by_posting_created_at', ['postingId', 'createdAt']),
 

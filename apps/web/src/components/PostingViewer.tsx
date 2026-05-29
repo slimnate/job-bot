@@ -123,6 +123,11 @@ export function PostingViewer() {
     postingIdsForCounts.length ? { postingIds: postingIdsForCounts } : 'skip'
   );
 
+  const coverLetterCounts = useQuery(
+    api.postingCoverLetters.countForPostings,
+    postingIdsForCounts.length ? { postingIds: postingIdsForCounts } : 'skip'
+  );
+
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / postingPageSize));
   const currentPage = pageIndex + 1;
   const canGoPrev = pageIndex > 0;
@@ -612,6 +617,7 @@ export function PostingViewer() {
         selectedPostingIds={selectedPostingIds}
         onTogglePostingSelection={onTogglePostingSelection}
         questionCounts={questionCounts}
+        coverLetterCounts={coverLetterCounts}
         workerTriggerBaseUrl={workerTriggerBaseUrl}
         emptyMessage={postingsLoading && !postings.length ? 'Loading…' : 'No postings match these filters.'}
       />

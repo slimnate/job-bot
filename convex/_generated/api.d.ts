@@ -11,6 +11,7 @@
 import type * as appSettings from "../appSettings.js";
 import type * as crons from "../crons.js";
 import type * as evaluators from "../evaluators.js";
+import type * as postingCoverLetters from "../postingCoverLetters.js";
 import type * as postingQuestions from "../postingQuestions.js";
 import type * as postings from "../postings.js";
 import type * as postingsListHelpers from "../postingsListHelpers.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   appSettings: typeof appSettings;
   crons: typeof crons;
   evaluators: typeof evaluators;
+  postingCoverLetters: typeof postingCoverLetters;
   postingQuestions: typeof postingQuestions;
   postings: typeof postings;
   postingsListHelpers: typeof postingsListHelpers;

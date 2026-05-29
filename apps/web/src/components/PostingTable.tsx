@@ -7,6 +7,7 @@ import type { Id } from '../../../../convex/_generated/dataModel.js';
 import { formatHumanizedTime } from '../lib/time';
 import { MarkdownContent } from './MarkdownContent.js';
 import { PostingAskPanel } from './PostingAskPanel.js';
+import { PostingCoverLetterPanel } from './PostingCoverLetterPanel.js';
 import {
   DimensionScoresCompactTable,
   type DimensionScoresRecord,
@@ -32,6 +33,14 @@ const formatOverallScore = (score?: number | null): string => {
   }
   return `${score}/100`;
 };
+
+/** Suffix for the Cover letter expander when prior versions exist, e.g. " · 2 versions". */
+function formatCoverLetterCountSuffix(count: number): string {
+  if (count <= 0) {
+    return '';
+  }
+  return count === 1 ? ' · 1 version' : ` · ${count} versions`;
+}
 
 /** Suffix for the Ask expander when prior questions exist, e.g. " · 2 questions". */
 function formatAskQuestionCountSuffix(count: number): string {
@@ -457,6 +466,8 @@ type PostingTableProps = {
   onTogglePostingSelection?: (postingId: string, checked: boolean) => void;
   /** Per-posting question counts for Ask button labels. */
   questionCounts?: Record<string, number>;
+  /** Per-posting cover letter version counts for Cover letter button labels. */
+  coverLetterCounts?: Record<string, number>;
   /** Worker base URL (no `/trigger`) for Cursor Ask path. */
   workerTriggerBaseUrl?: string | null;
 };
@@ -470,14 +481,17 @@ export function PostingTable({
   selectedPostingIds,
   onTogglePostingSelection,
   questionCounts,
+  coverLetterCounts,
   workerTriggerBaseUrl = null,
 }: PostingTableProps) {
   const showActions = Boolean(onDeletePosting || onOpenScoreDialog);
   const showSelection = Boolean(onTogglePostingSelection);
   const showAsk = Boolean(onDeletePosting || onOpenScoreDialog);
+  const showCoverLetter = Boolean(onDeletePosting || onOpenScoreDialog);
   const [selectedPostingId, setSelectedPostingId] = useState<Id<'job_postings'> | null>(null);
   const [selectedPostingTitle, setSelectedPostingTitle] = useState('');
   const [expandedAskIds, setExpandedAskIds] = useState<Set<string>>(new Set());
+  const [expandedCoverLetterIds, setExpandedCoverLetterIds] = useState<Set<string>>(new Set());
 
   const closeModal = () => {
     setSelectedPostingId(null);
@@ -491,6 +505,18 @@ export function PostingTable({
 
   const toggleAskPanel = (postingId: string) => {
     setExpandedAskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(postingId)) {
+        next.delete(postingId);
+      } else {
+        next.add(postingId);
+      }
+      return next;
+    });
+  };
+
+  const toggleCoverLetterPanel = (postingId: string) => {
+    setExpandedCoverLetterIds((prev) => {
       const next = new Set(prev);
       if (next.has(postingId)) {
         next.delete(postingId);
@@ -535,6 +561,18 @@ export function PostingTable({
                 askCount !== undefined && askCount > 0
                   ? `${askToggleBase}, ${askCount} previous ${askCount === 1 ? 'question' : 'questions'}`
                   : askToggleBase;
+              const coverLetterCount =
+                coverLetterCounts !== undefined ? (coverLetterCounts[posting._id] ?? 0) : undefined;
+              const coverLetterCountSuffix =
+                coverLetterCount !== undefined
+                  ? formatCoverLetterCountSuffix(coverLetterCount)
+                  : '';
+              const coverLetterExpanded = expandedCoverLetterIds.has(posting._id);
+              const coverLetterToggleBase = coverLetterExpanded ? 'Hide cover letter' : 'Cover letter';
+              const coverLetterToggleAriaLabel =
+                coverLetterCount !== undefined && coverLetterCount > 0
+                  ? `${coverLetterToggleBase}, ${coverLetterCount} ${coverLetterCount === 1 ? 'version' : 'versions'}`
+                  : coverLetterToggleBase;
               return (
                 <li key={posting._id}>
                   <article className='posting-item' aria-label={`Posting: ${posting.title}`}>
@@ -619,6 +657,46 @@ export function PostingTable({
                       descriptionSnippet={posting.descriptionSnippet}
                     />
                     <RankingDetails postingId={posting._id} ranking={posting.latestRanking} />
+                    {showCoverLetter ? (
+                      <div
+                        className={[
+                          'posting-item__cover-letter-wrap',
+                          coverLetterExpanded ? 'posting-item__cover-letter-wrap--open' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
+                        {coverLetterExpanded ? (
+                          <PostingCoverLetterPanel
+                            postingId={posting._id}
+                            workerTriggerBaseUrl={workerTriggerBaseUrl}
+                          />
+                        ) : null}
+                        <button
+                          type='button'
+                          className='posting-item__cover-letter-toggle'
+                          onClick={() => toggleCoverLetterPanel(posting._id)}
+                          aria-expanded={coverLetterExpanded}
+                          aria-controls={`posting-cover-letter-panel-${posting._id}`}
+                          aria-label={coverLetterToggleAriaLabel}
+                        >
+                          <span className='posting-item__cover-letter-toggle-text'>
+                            {coverLetterToggleBase}
+                            {coverLetterCountSuffix ? (
+                              <span className='posting-item__cover-letter-count'>
+                                {coverLetterCountSuffix}
+                              </span>
+                            ) : null}
+                          </span>
+                          {coverLetterCount !== undefined && coverLetterCount > 0 ? (
+                            <span className='posting-item__cover-letter-badge' aria-hidden='true'>
+                              {coverLetterCount}
+                            </span>
+                          ) : null}
+                          <span className='posting-item__cover-letter-chevron' aria-hidden='true' />
+                        </button>
+                      </div>
+                    ) : null}
                     {showAsk ? (
                       <div
                         className={[

@@ -2,17 +2,17 @@ Make chrome worker use a profile or something similar so that the worker does no
 
 Examine tests created, document test suite, make sure tests (specifically linkedin related) aren't doing lots of unnecessary work.
 
-Feature to create cover letter outline for posting.
-
 Add ability to archive postings, and a page to view archived postings. I may want to periodically examine archived postings that were a good fit to see if there are more new postings from the same employer that I can check on. Maybe add options to archive with a status of "good" or "bad" so that I can filter archived postings as well, and potentially use the archived postings to inform future rankings.
 
-Application status tracking
+Application status tracking. "Starred" feature to mark postings that are important. Add status field to postings such as: want to apply, applied, wont apply, rejected, etc.
 
 Notifications
 
 Optimize README for human consumption
 
 Wizard to create a scoring rubric for any generic type of job the user could want
+
+Review system prompts and make modifications as necessary
 
 on the workers page queue dialog, lets show the user what the default evaluator for the source is in the dropdown.
 - If the source has an evaluator: "Source default (<preset name>)"
