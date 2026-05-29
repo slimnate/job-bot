@@ -13,7 +13,9 @@
     'div[componentkey="navBarJobTypeaheadComponentRef"] input[data-testid="typeahead-input"]',
     'div[role="search"] input[data-testid="typeahead-input"]',
     'input[componentkey="jobSearchBox"]',
+    '[data-testid="typeahead-input"][componentkey="jobSearchBox"]',
     'input[data-testid="typeahead-input"]',
+    '[data-testid="typeahead-input"][contenteditable="true"]',
     'input[placeholder="Describe the job you want"]',
     'input[aria-label*="Search by title"]',
     'input[aria-label*="Search jobs"]',
@@ -22,12 +24,25 @@
   ];
 
   /**
+   * True for SDUI keyword field (`input` or contenteditable typeahead).
+   */
+  function isJobsSearchField(el) {
+    if (!el || !(el instanceof HTMLElement)) return false;
+    if (el instanceof HTMLInputElement) return true;
+    return (
+      el.getAttribute('data-testid') === 'typeahead-input' &&
+      el.getAttribute('contenteditable') === 'true'
+    );
+  }
+
+  /**
    * Returns true when the element is visible enough to interact with.
    * Falls back to connected + not display:none when layout size is zero (e.g. jsdom).
    */
   function isVisibleInput(el) {
-    if (!el || !(el instanceof HTMLInputElement)) return false;
-    if (el.disabled || el.getAttribute('aria-hidden') === 'true') return false;
+    if (!isJobsSearchField(el)) return false;
+    if (el instanceof HTMLInputElement && el.disabled) return false;
+    if (el.getAttribute('aria-hidden') === 'true') return false;
     if (!el.isConnected) return false;
     const rect = el.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) return true;
@@ -40,17 +55,80 @@
   }
 
   /**
+   * Clicks collapsed jobs search chrome so the typeahead input can mount or become visible.
+   */
+  function expandJobsSearchUi(doc) {
+    const document = doc || global.document;
+    const collapsed = document.querySelector(
+      'div[role="search"][data-expanded="false"], [role="search"][data-expanded="false"]'
+    );
+    if (collapsed instanceof HTMLElement) {
+      collapsed.click();
+      return true;
+    }
+    const jobBox = document.querySelector(
+      'div[data-sdui-component*="jobSearchBox"], [componentkey="navBarJobTypeaheadComponentRef"]'
+    );
+    if (jobBox instanceof HTMLElement) {
+      jobBox.click();
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Finds the primary jobs search input on /jobs/ (combined typeahead query).
    */
   function findJobsSearchInput(doc) {
     const document = doc || global.document;
-    for (const selector of KEYWORD_INPUT_SELECTORS) {
-      const found = document.querySelector(selector);
-      if (isVisibleInput(found)) {
-        return { input: found, selector };
+    for (let pass = 0; pass < 2; pass++) {
+      for (const selector of KEYWORD_INPUT_SELECTORS) {
+        const nodes = document.querySelectorAll(selector);
+        for (const found of nodes) {
+          if (isVisibleInput(found)) {
+            return { input: found, selector };
+          }
+        }
       }
+      if (pass === 0 && expandJobsSearchUi(document)) {
+        continue;
+      }
+      break;
     }
     return null;
+  }
+
+  /**
+   * LinkedIn SDUI full-page error shell (visible copy only — `meta[name="como-err"]` is always
+   * present as error-boundary config, even on healthy /jobs/ pages).
+   */
+  function linkedInJobsPageHasError(doc) {
+    const document = doc || global.document;
+    const body = document.body;
+    const bodyText =
+      (body && (body.innerText || body.textContent)) || '';
+    if (!/something went wrong/i.test(bodyText)) {
+      return false;
+    }
+    if (/try again/i.test(bodyText)) {
+      return true;
+    }
+    const retryControl = document.querySelector(
+      'button[aria-label*="Try again" i], a[aria-label*="Try again" i], [role="button"][aria-label*="Try again" i]'
+    );
+    return Boolean(retryControl && retryControl instanceof HTMLElement);
+  }
+
+  /**
+   * Poll helper: whether the jobs keyword typeahead is present and interactable.
+   */
+  function pollJobsSearchInputReady(doc) {
+    const document = doc || global.document;
+    if (linkedInJobsPageHasError(document)) {
+      return { ready: false, pageError: true, selector: null };
+    }
+    const found = findJobsSearchInput(document);
+    return { ready: Boolean(found), pageError: false, selector: found?.selector ?? null };
   }
 
   /**
@@ -59,12 +137,16 @@
   function setInputValue(input, value) {
     input.focus();
     input.click();
-    const proto = Object.getPrototypeOf(input);
-    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(input, value);
-    } else {
-      input.value = value;
+    if (input instanceof HTMLInputElement) {
+      const proto = Object.getPrototypeOf(input);
+      const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (descriptor && descriptor.set) {
+        descriptor.set.call(input, value);
+      } else {
+        input.value = value;
+      }
+    } else if (input.getAttribute('contenteditable') === 'true') {
+      input.textContent = value;
     }
     try {
       input.dispatchEvent(
@@ -142,6 +224,9 @@
   const api = {
     KEYWORD_INPUT_SELECTORS,
     findJobsSearchInput,
+    expandJobsSearchUi,
+    linkedInJobsPageHasError,
+    pollJobsSearchInputReady,
     setInputValue,
     submitJobsSearch,
     applyJobsSearchUi,

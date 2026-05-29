@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { JOB_BOT_POSTING_PUSH_BINDING, type ChromeDriver } from '@job-bot/agent-core';
 import { parseAppSettingValue } from '@job-bot/shared';
 
+import { ensureWorkerChromeForLinkedIn } from '../chromeSession.js';
 import type { Id } from '../convexBridge/doc.js';
 import { isScrapeDebug } from '../debugFlags.js';
 import { workerLog } from '../log.js';
@@ -516,6 +517,71 @@ function buildLinkedInApplySearchUiExpression(uiQuery: string): string {
   })()`;
 }
 
+function buildLinkedInSearchInputReadyExpression(): string {
+  const SEARCH_UI = loadLinkedInSearchUiSource();
+  return `(() => {
+    ${SEARCH_UI}
+    return globalThis.__jobBotLiSearchUi.pollJobsSearchInputReady(document);
+  })()`;
+}
+
+type LinkedInSearchInputPoll = {
+  ready: boolean;
+  pageError?: boolean;
+  selector?: string | null;
+};
+
+/**
+ * Waits until the /jobs/ keyword typeahead is in the DOM and interactable.
+ * The jobs shell can become "ready" before React mounts the search box.
+ */
+async function waitForJobsSearchInput(driver: ChromeDriver, timeoutMs: number): Promise<void> {
+  const pollScript = buildLinkedInSearchInputReadyExpression();
+  const jobsHubUrl = 'https://www.linkedin.com/jobs/';
+  const start = Date.now();
+  let reloadedForError = false;
+
+  while (Date.now() - start < timeoutMs) {
+    let state: LinkedInSearchInputPoll;
+    try {
+      state = await driver.evaluate<LinkedInSearchInputPoll>(pollScript);
+    } catch (err) {
+      workerLog.warn('linkedin.search_ui', {
+        phase: 'poll_evaluate_failed',
+        message: err instanceof Error ? err.message : String(err),
+      });
+      await ensureWorkerChromeForLinkedIn();
+      await sleep(400);
+      continue;
+    }
+    if (state.ready) {
+      workerLog.info('linkedin.search_ui', {
+        phase: 'input_ready',
+        selector: state.selector ?? null,
+        waitedMs: Date.now() - start,
+      });
+      return;
+    }
+    if (state.pageError && !reloadedForError) {
+      reloadedForError = true;
+      workerLog.warn('linkedin.search_ui', {
+        phase: 'page_error_reload',
+        waitedMs: Date.now() - start,
+      });
+      await ensureWorkerChromeForLinkedIn();
+      await driver.navigate(jobsHubUrl, { timeoutMs: 60_000 });
+      await sleep(2500);
+      continue;
+    }
+    await sleep(400);
+  }
+
+  throw new Error(
+    'Timed out waiting for the LinkedIn jobs search box on /jobs/. ' +
+      'Try WORKER_CHROME_HEADLESS=0, complete any LinkedIn error screen, or reload the jobs page manually.'
+  );
+}
+
 type LinkedInUiSearchResult = {
   ok: boolean;
   reason?: string;
@@ -665,11 +731,10 @@ export async function collectLinkedInPostings(params: {
       workerLog.debug('linkedin.milestone', { phase: 'after_initial_jobs_shell' });
     }
 
-    await injectOverlayIfNeeded();
-
     let searchStrategyUsed: 'ui' | 'preferences_hub' = 'preferences_hub';
 
     if (useSearchPath) {
+      await waitForJobsSearchInput(params.driver, 120_000);
       const uiResult = await params.driver.evaluate<LinkedInUiSearchResult>(
         buildLinkedInApplySearchUiExpression(uiQuery)
       );
@@ -694,7 +759,9 @@ export async function collectLinkedInPostings(params: {
         workerLog.debug('linkedin.milestone', { phase: 'after_search_ui_sleep' });
       }
       await waitForLinkedInJobsShell(params.driver, 120_000, autoLogin);
+      await injectOverlayIfNeeded();
     } else {
+      await injectOverlayIfNeeded();
       if (steppingEnabled) {
         if (isScrapeDebug()) {
           workerLog.debug('linkedin.debug_step', { phase: 'jobs_hub_before_show_all' });

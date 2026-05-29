@@ -1,6 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { access, mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -12,6 +11,8 @@ import { parseAppSettingValue } from '@job-bot/shared';
 
 import { isScrapeDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
+import { resolveWorkerIdFromEnv } from './settings/settingsCache.js';
+import { resolveChromeUserDataDir } from './workerPaths.js';
 
 export type WorkerChromeSessionOptions = {
   /** When true, start Chrome and connect over CDP. */
@@ -26,8 +27,12 @@ export type WorkerChromeSessionOptions = {
    */
   autoCleanupAfterLinkedInScrape: boolean;
   port: number;
+  /** Persistent Chrome profile (cookies, LinkedIn session). */
+  userDataDir: string;
   executablePath?: string;
 };
+
+const STALE_CHROME_LOCK_FILES = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'] as const;
 
 function requireResolved(env: Record<string, string | undefined>, key: string): string {
   const raw = env[key];
@@ -60,6 +65,9 @@ export function loadWorkerChromeSessionOptionsFromEnv(
     requireResolved(env, 'WORKER_CHROME_PORT')
   ) as number;
 
+  const userDataDirRaw = requireResolved(env, 'WORKER_CHROME_USER_DATA_DIR');
+  const workerId = resolveWorkerIdFromEnv();
+
   return {
     enabled: parseAppSettingValue(
       'WORKER_USE_CHROME',
@@ -75,6 +83,7 @@ export function loadWorkerChromeSessionOptionsFromEnv(
       requireResolved(env, 'WORKER_AUTO_CLEANUP_CHROME')
     ) as boolean,
     port,
+    userDataDir: resolveChromeUserDataDir(userDataDirRaw, workerId),
     executablePath: env.CHROME_PATH,
   };
 }
@@ -100,11 +109,39 @@ async function waitForDevToolsEndpoint(port: number, timeoutMs: number): Promise
   throw new Error(`Timed out waiting for Chrome DevTools on port ${port}`);
 }
 
+/**
+ * Chrome may leave lock files after a crash; remove them when no managed process is running.
+ */
+async function clearStaleChromeProfileLocks(userDataDir: string): Promise<void> {
+  const removed: string[] = [];
+  for (const name of STALE_CHROME_LOCK_FILES) {
+    const filePath = join(userDataDir, name);
+    try {
+      await access(filePath);
+      await unlink(filePath);
+      removed.push(name);
+    } catch {
+      /* file absent */
+    }
+  }
+  if (removed.length > 0) {
+    workerLog.info('chrome.session', {
+      phase: 'stale_lock_cleanup',
+      userDataDir,
+      removed,
+    });
+  }
+}
+
+async function prepareChromeProfileDir(userDataDir: string): Promise<void> {
+  await mkdir(userDataDir, { recursive: true });
+  await clearStaleChromeProfileLocks(userDataDir);
+}
+
 export class WorkerChromeSession {
   private readonly options: WorkerChromeSessionOptions;
   private readonly driver: CdpChromeDriver;
   private child: ChildProcess | null = null;
-  private userDataDir: string | null = null;
   private started = false;
 
   constructor(options: WorkerChromeSessionOptions) {
@@ -122,6 +159,26 @@ export class WorkerChromeSession {
   /** True when the worker is configured to spawn and own the Chrome process. */
   isManagedChrome(): boolean {
     return this.options.manageChrome;
+  }
+
+  private async spawnManagedChrome(phase: 'spawn' | 'respawn'): Promise<void> {
+    await prepareChromeProfileDir(this.options.userDataDir);
+    workerLog.info('chrome.session', {
+      phase,
+      port: this.options.port,
+      headless: this.options.headless,
+      userDataDir: this.options.userDataDir,
+    });
+    this.child = await launchChromeWithRemoteDebugging({
+      port: this.options.port,
+      headless: this.options.headless,
+      userDataDir: this.options.userDataDir,
+      executablePath: this.options.executablePath,
+    });
+    this.child.once('exit', (code, signal) => {
+      void this.onChromeProcessExit(code, signal);
+    });
+    await waitForDevToolsEndpoint(this.options.port, 45_000);
   }
 
   /**
@@ -161,27 +218,7 @@ export class WorkerChromeSession {
           this.child.removeAllListeners('exit');
         }
         this.child = null;
-        if (this.userDataDir) {
-          await rm(this.userDataDir, { recursive: true, force: true }).catch(() => {});
-          this.userDataDir = null;
-        }
-        this.userDataDir = await mkdtemp(join(tmpdir(), 'job-bot-chrome-'));
-        workerLog.info('chrome.session', {
-          phase: 'respawn',
-          port: this.options.port,
-          headless: this.options.headless,
-          userDataDir: this.userDataDir,
-        });
-        this.child = await launchChromeWithRemoteDebugging({
-          port: this.options.port,
-          headless: this.options.headless,
-          userDataDir: this.userDataDir,
-          executablePath: this.options.executablePath,
-        });
-        this.child.once('exit', (code, signal) => {
-          void this.onChromeProcessExit(code, signal);
-        });
-        await waitForDevToolsEndpoint(this.options.port, 45_000);
+        await this.spawnManagedChrome('respawn');
       } else {
         await waitForDevToolsEndpoint(this.options.port, 5000);
       }
@@ -223,23 +260,7 @@ export class WorkerChromeSession {
     }
 
     if (this.options.manageChrome) {
-      this.userDataDir = await mkdtemp(join(tmpdir(), 'job-bot-chrome-'));
-      workerLog.info('chrome.session', {
-        phase: 'spawn',
-        port: this.options.port,
-        headless: this.options.headless,
-        userDataDir: this.userDataDir,
-      });
-      this.child = await launchChromeWithRemoteDebugging({
-        port: this.options.port,
-        headless: this.options.headless,
-        userDataDir: this.userDataDir,
-        executablePath: this.options.executablePath,
-      });
-      this.child.once('exit', (code, signal) => {
-        void this.onChromeProcessExit(code, signal);
-      });
-      await waitForDevToolsEndpoint(this.options.port, 45_000);
+      await this.spawnManagedChrome('spawn');
     } else {
       workerLog.info('chrome.session', {
         phase: 'connect_only',
@@ -263,15 +284,11 @@ export class WorkerChromeSession {
       this.child.kill();
       this.child = null;
     }
-    if (this.userDataDir) {
-      await rm(this.userDataDir, { recursive: true, force: true }).catch(() => {});
-      this.userDataDir = null;
-    }
     this.started = false;
-    if (sharedSession === this) {
-      sharedSession = null;
-    }
-    workerLog.info('chrome.session', { phase: 'stopped' });
+    workerLog.info('chrome.session', {
+      phase: 'stopped',
+      userDataDir: this.options.userDataDir,
+    });
   }
 
   /**
@@ -345,4 +362,10 @@ export async function ensureWorkerChromeForLinkedIn(): Promise<void> {
  */
 export async function closeWorkerChromeAfterLinkedInScrape(): Promise<void> {
   await sharedSession?.closeAfterLinkedInScrape();
+}
+
+/** Stops managed Chrome and clears the shared session (worker shutdown only). */
+export async function shutdownWorkerChromeSession(): Promise<void> {
+  await sharedSession?.stop();
+  sharedSession = null;
 }

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createWorkerConvexClient } from './convexHttp.js';
-import { initWorkerChromeFromEnv } from './chromeSession.js';
+import { initWorkerChromeFromEnv, shutdownWorkerChromeSession } from './chromeSession.js';
 import { isSchedulerDebug } from './debugFlags.js';
 import { workerLog } from './log.js';
 import { parseLinkedInDebugStepsFromResolvedEnv } from './sources/linkedinDebugSteps.js';
@@ -104,7 +104,7 @@ export async function startWorker(): Promise<{
   const stop = async () => {
     scheduler.stop();
     await stopWorkerTriggerServer(triggerServer);
-    await chromeSession?.stop();
+    await shutdownWorkerChromeSession();
     workerLog.info('worker.stopped', {});
   };
 

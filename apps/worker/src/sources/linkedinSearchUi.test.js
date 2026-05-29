@@ -65,6 +65,56 @@ test('applyJobsSearchUi fills typeahead and submits via Enter', () => {
   assert.strictEqual(result.submitSelector, 'keyword_enter');
 });
 
+test('pollJobsSearchInputReady is false until typeahead mounts', () => {
+  const dom = new JSDOM('<html><body><main>Jobs</main></body></html>', {
+    url: 'https://www.linkedin.com/jobs/',
+    runScripts: 'dangerously',
+  });
+  const ui = loadSearchUi(dom);
+  const before = ui.pollJobsSearchInputReady(dom.window.document);
+  assert.strictEqual(before.ready, false);
+
+  dom.window.document.body.innerHTML = JOBS_HUB_SEARCH_HTML;
+  const after = ui.pollJobsSearchInputReady(dom.window.document);
+  assert.strictEqual(after.ready, true);
+  assert.match(after.selector, /jobSearchBox/);
+});
+
+test('como-err meta alone is not treated as a page error (example-jobs.html)', () => {
+  const html = readFileSync(join(__dirname, '../../../../ex/example-jobs.html'), 'utf8');
+  const dom = new JSDOM(html, {
+    url: 'https://www.linkedin.com/jobs/',
+    runScripts: 'dangerously',
+  });
+  const ui = loadSearchUi(dom);
+  const poll = ui.pollJobsSearchInputReady(dom.window.document);
+  assert.strictEqual(poll.pageError, false);
+  assert.strictEqual(poll.ready, true);
+});
+
+test('example-search-fail.html: search input present; como-err meta is not a page error', () => {
+  const html = readFileSync(join(__dirname, '../../../../ex/example-search-fail.html'), 'utf8');
+  const dom = new JSDOM(html, {
+    url: 'https://www.linkedin.com/jobs/',
+    runScripts: 'dangerously',
+  });
+  const ui = loadSearchUi(dom);
+  const poll = ui.pollJobsSearchInputReady(dom.window.document);
+  assert.strictEqual(poll.pageError, false);
+  assert.strictEqual(poll.ready, true);
+});
+
+test('visible error copy is treated as page error', () => {
+  const dom = new JSDOM(
+    '<html><body><h1>Something went wrong</h1><button>Try again</button></body></html>',
+    { url: 'https://www.linkedin.com/jobs/', runScripts: 'dangerously' }
+  );
+  const ui = loadSearchUi(dom);
+  const poll = ui.pollJobsSearchInputReady(dom.window.document);
+  assert.strictEqual(poll.pageError, true);
+  assert.strictEqual(poll.ready, false);
+});
+
 test('legacy keyword field still works when SDUI typeahead is absent', () => {
   const html = `
     <input aria-label="Search by title, skill or company" id="jobs-search-box-keyword-id-ember42" />

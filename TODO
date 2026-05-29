@@ -1,4 +1,4 @@
-Make chrome worker use a profile or something similar so that the worker does not have to log in to linkedin every time. We are sometimes hitting a captcha check that will block the worker without manual intervention.
+Capture chrome state on scraping failure: Capture page contents (HTML, JS, etc) and console output for debugging purposes.
 
 [x] Archive postings with good/bad labels; filter archived on /postings (active / archived / good / bad).
 Use archived good postings to revisit employers — filter by company on active list.

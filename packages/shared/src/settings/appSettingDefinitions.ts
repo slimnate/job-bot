@@ -139,9 +139,18 @@ export const APP_SETTING_DEFINITIONS: readonly AppSettingDefinition[] = [
     key: 'WORKER_AUTO_CLEANUP_CHROME',
     label: 'Close Chrome after LinkedIn runs',
     hint:
-      'When enabled (default), the worker tears down the Chrome instance after each LinkedIn scrape finishes. Set to off to keep Chrome alive across runs while debugging. WORKER_AUTO_CLEANUP_CHROME=0 in .env.local overrides a saved “on” value.',
+      'When enabled (default), the worker stops the Chrome process after each LinkedIn scrape (cookies and login stay on disk in the Chrome profile). Set to off to keep the browser process running between runs while debugging. WORKER_AUTO_CLEANUP_CHROME=0 in .env.local overrides a saved “on” value.',
     type: 'boolean',
     section: 'linkedin',
+  }),
+  settingDef({
+    key: 'WORKER_CHROME_USER_DATA_DIR',
+    label: 'Chrome profile directory',
+    hint:
+      'Directory for Chrome user data (cookies, LinkedIn session). Empty uses ~/.config/job-bot/chrome-profile, or chrome-profile-<WORKER_ID> when WORKER_ID is not default. Relative paths are under apps/worker. Contains session secrets—do not share. Delete the folder to force a fresh login. WORKER_CHROME_USER_DATA_DIR in env overrides this field.',
+    type: 'string',
+    section: 'linkedin',
+    optional: true,
   }),
   settingDef({
     key: 'WORKER_CHROME_PORT',

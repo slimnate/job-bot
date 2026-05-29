@@ -6,7 +6,7 @@ export type LaunchChromeWithRemoteDebuggingParams = {
   port: number;
   /** When false, opens a visible browser window (best for developing scrapers). */
   headless: boolean;
-  /** Isolated profile directory (required for stable CDP + parallel runs). */
+  /** Chrome profile directory (persistent path preserves cookies across restarts). */
   userDataDir: string;
   /** Override Chrome/Chromium binary; otherwise common paths are tried. */
   executablePath?: string;
@@ -52,6 +52,7 @@ export function buildChromeRemoteDebuggingArgs(params: LaunchChromeWithRemoteDeb
     `--user-data-dir=${params.userDataDir}`,
     '--no-first-run',
     '--no-default-browser-check',
+    '--disable-extensions',
     `--window-size=${width},${height}`,
   ];
   if (params.headless) {

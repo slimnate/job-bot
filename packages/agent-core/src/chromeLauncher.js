@@ -37,6 +37,7 @@ export function buildChromeRemoteDebuggingArgs(params) {
         `--user-data-dir=${params.userDataDir}`,
         '--no-first-run',
         '--no-default-browser-check',
+        '--disable-extensions',
         `--window-size=${width},${height}`,
     ];
     if (params.headless) {
