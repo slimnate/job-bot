@@ -316,7 +316,7 @@ export const deleteOne = mutation({
   handler: async (ctx, args) => {
     const posting = await ctx.db.get(args.postingId);
     if (!posting) {
-      return { deletedPosting: false, deletedRankings: 0 };
+      return { deletedPosting: false, deletedRankings: 0, deletedQuestions: 0 };
     }
 
     let deletedRankings = 0;
@@ -334,8 +334,23 @@ export const deleteOne = mutation({
       }
     }
 
+    let deletedQuestions = 0;
+    for (;;) {
+      const batch = await ctx.db
+        .query('posting_questions')
+        .withIndex('by_posting_created_at', (q) => q.eq('postingId', args.postingId))
+        .take(200);
+      if (batch.length === 0) {
+        break;
+      }
+      for (const row of batch) {
+        await ctx.db.delete(row._id);
+        deletedQuestions += 1;
+      }
+    }
+
     await ctx.db.delete(args.postingId);
-    return { deletedPosting: true, deletedRankings };
+    return { deletedPosting: true, deletedRankings, deletedQuestions };
   },
 });
 
@@ -356,14 +371,20 @@ export const clearAll = mutation({
       await ctx.db.delete(row._id);
     }
 
+    const questionsBatch = await ctx.db.query('posting_questions').take(batchSize);
+    for (const row of questionsBatch) {
+      await ctx.db.delete(row._id);
+    }
+
     const postingsBatch = await ctx.db.query('job_postings').take(batchSize);
     for (const row of postingsBatch) {
       await ctx.db.delete(row._id);
     }
 
     const hasMoreRankings = (await ctx.db.query('job_rankings').take(1)).length > 0;
+    const hasMoreQuestions = (await ctx.db.query('posting_questions').take(1)).length > 0;
     const hasMorePostings = (await ctx.db.query('job_postings').take(1)).length > 0;
-    const hasMore = hasMoreRankings || hasMorePostings;
+    const hasMore = hasMoreRankings || hasMoreQuestions || hasMorePostings;
 
     if (hasMore) {
       await ctx.scheduler.runAfter(0, api.postings.clearAll, { batchSize });
@@ -372,6 +393,7 @@ export const clearAll = mutation({
     return {
       deletedPostings: postingsBatch.length,
       deletedRankings: rankingsBatch.length,
+      deletedQuestions: questionsBatch.length,
       hasMore,
     };
   },

@@ -113,6 +113,16 @@ export function PostingViewer() {
   const postings = pageResult?.page ?? [];
   const postingsLoading = pageResult === undefined;
 
+  const postingIdsForCounts = useMemo(
+    () => (postings.length ? postings.map((p) => p._id) : []),
+    [postings]
+  );
+
+  const questionCounts = useQuery(
+    api.postingQuestions.countForPostings,
+    postingIdsForCounts.length ? { postingIds: postingIdsForCounts } : 'skip'
+  );
+
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / postingPageSize));
   const currentPage = pageIndex + 1;
   const canGoPrev = pageIndex > 0;
@@ -601,6 +611,8 @@ export function PostingViewer() {
         onOpenScoreDialog={openScoreDialog}
         selectedPostingIds={selectedPostingIds}
         onTogglePostingSelection={onTogglePostingSelection}
+        questionCounts={questionCounts}
+        workerTriggerBaseUrl={workerTriggerBaseUrl}
         emptyMessage={postingsLoading && !postings.length ? 'Loading…' : 'No postings match these filters.'}
       />
       <div className='postings-pagination' aria-label='Postings pagination'>

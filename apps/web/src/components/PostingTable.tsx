@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from 'convex/react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { FunctionReturnType } from 'convex/server';
 
 import { api } from '../../../../convex/_generated/api.js';
 import type { Id } from '../../../../convex/_generated/dataModel.js';
 import { formatHumanizedTime } from '../lib/time';
+import { MarkdownContent } from './MarkdownContent.js';
+import { PostingAskPanel } from './PostingAskPanel.js';
 import {
   DimensionScoresCompactTable,
   type DimensionScoresRecord,
@@ -32,6 +32,14 @@ const formatOverallScore = (score?: number | null): string => {
   }
   return `${score}/100`;
 };
+
+/** Suffix for the Ask expander when prior questions exist, e.g. " · 2 questions". */
+function formatAskQuestionCountSuffix(count: number): string {
+  if (count <= 0) {
+    return '';
+  }
+  return count === 1 ? ' · 1 question' : ` · ${count} questions`;
+}
 
 const getScoreColorClass = (score?: number | null): string => {
   if (typeof score !== 'number' || Number.isNaN(score)) {
@@ -102,29 +110,12 @@ function PostingDescription({ postingId, descriptionSnippet }: PostingDescriptio
   );
 }
 
-type ReasoningMarkdownProps = {
-  value?: string | null;
-  className?: string;
-};
-
-function ReasoningMarkdown({ value, className }: ReasoningMarkdownProps) {
-  const content = value?.trim();
-  if (!content) {
-    return <span className={className}>-</span>;
-  }
-  return (
-    <div className={className}>
-      <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
-    </div>
-  );
-}
-
 type ReasoningScoreTableProps = {
   reasoningSummary: string;
 };
 
 function ReasoningFallback({ content }: { content: string }) {
-  return <ReasoningMarkdown value={content} className='posting-item__reasoning' />;
+  return <MarkdownContent value={content} className='posting-item__reasoning' />;
 }
 
 function ReasoningScoreTable({ reasoningSummary }: ReasoningScoreTableProps) {
@@ -154,7 +145,7 @@ function ReasoningScoreTable({ reasoningSummary }: ReasoningScoreTableProps) {
         </tbody>
       </table>
       {remainderMarkdown ? (
-        <ReasoningMarkdown
+        <MarkdownContent
           value={remainderMarkdown}
           className='posting-item__reasoning posting-item__reasoning--remainder'
         />
@@ -358,7 +349,7 @@ function ViewPostingModal({ postingId, title, onClose }: ViewPostingModalProps) 
                 <dd>{latestRanking?.scoreOverall ?? '-'}</dd>
                 <dt>Latest reasoning</dt>
                 <dd>
-                  <ReasoningMarkdown
+                  <MarkdownContent
                     value={latestRanking?.reasoningSummary}
                     className='details-grid__markdown'
                   />
@@ -409,6 +400,10 @@ type PostingTableProps = {
   onOpenScoreDialog?: (posting: PostingTableRow) => void;
   selectedPostingIds?: Set<string>;
   onTogglePostingSelection?: (postingId: string, checked: boolean) => void;
+  /** Per-posting question counts for Ask button labels. */
+  questionCounts?: Record<string, number>;
+  /** Worker base URL (no `/trigger`) for Cursor Ask path. */
+  workerTriggerBaseUrl?: string | null;
 };
 
 export function PostingTable({
@@ -419,11 +414,15 @@ export function PostingTable({
   onOpenScoreDialog,
   selectedPostingIds,
   onTogglePostingSelection,
+  questionCounts,
+  workerTriggerBaseUrl = null,
 }: PostingTableProps) {
   const showActions = Boolean(onDeletePosting || onOpenScoreDialog);
   const showSelection = Boolean(onTogglePostingSelection);
+  const showAsk = Boolean(onDeletePosting || onOpenScoreDialog);
   const [selectedPostingId, setSelectedPostingId] = useState<Id<'job_postings'> | null>(null);
   const [selectedPostingTitle, setSelectedPostingTitle] = useState('');
+  const [expandedAskIds, setExpandedAskIds] = useState<Set<string>>(new Set());
 
   const closeModal = () => {
     setSelectedPostingId(null);
@@ -433,6 +432,18 @@ export function PostingTable({
   const openModal = (posting: PostingTableRow) => {
     setSelectedPostingId(posting._id);
     setSelectedPostingTitle(posting.title);
+  };
+
+  const toggleAskPanel = (postingId: string) => {
+    setExpandedAskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(postingId)) {
+        next.delete(postingId);
+      } else {
+        next.add(postingId);
+      }
+      return next;
+    });
   };
 
   const onDelete = async (posting: PostingTableRow) => {
@@ -459,6 +470,16 @@ export function PostingTable({
             {postings!.map((posting) => {
               const scoreOverall = posting.latestRanking?.scoreOverall;
               const scoreColorClass = getScoreColorClass(scoreOverall);
+              const askCount =
+                questionCounts !== undefined ? (questionCounts[posting._id] ?? 0) : undefined;
+              const askCountSuffix =
+                askCount !== undefined ? formatAskQuestionCountSuffix(askCount) : '';
+              const askExpanded = expandedAskIds.has(posting._id);
+              const askToggleBase = askExpanded ? 'Hide questions' : 'Ask about this job';
+              const askToggleAriaLabel =
+                askCount !== undefined && askCount > 0
+                  ? `${askToggleBase}, ${askCount} previous ${askCount === 1 ? 'question' : 'questions'}`
+                  : askToggleBase;
               return (
                 <li key={posting._id}>
                   <article className='posting-item' aria-label={`Posting: ${posting.title}`}>
@@ -543,6 +564,44 @@ export function PostingTable({
                       descriptionSnippet={posting.descriptionSnippet}
                     />
                     <RankingDetails postingId={posting._id} ranking={posting.latestRanking} />
+                    {showAsk ? (
+                      <div
+                        className={[
+                          'posting-item__ask-wrap',
+                          askExpanded ? 'posting-item__ask-wrap--open' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
+                        {askExpanded ? (
+                          <PostingAskPanel
+                            postingId={posting._id}
+                            workerTriggerBaseUrl={workerTriggerBaseUrl}
+                          />
+                        ) : null}
+                        <button
+                          type='button'
+                          className='posting-item__ask-toggle'
+                          onClick={() => toggleAskPanel(posting._id)}
+                          aria-expanded={askExpanded}
+                          aria-controls={`posting-ask-panel-${posting._id}`}
+                          aria-label={askToggleAriaLabel}
+                        >
+                          <span className='posting-item__ask-toggle-text'>
+                            {askToggleBase}
+                            {askCountSuffix ? (
+                              <span className='posting-item__ask-count'>{askCountSuffix}</span>
+                            ) : null}
+                          </span>
+                          {askCount !== undefined && askCount > 0 ? (
+                            <span className='posting-item__ask-badge' aria-hidden='true'>
+                              {askCount}
+                            </span>
+                          ) : null}
+                          <span className='posting-item__ask-chevron' aria-hidden='true' />
+                        </button>
+                      </div>
+                    ) : null}
                   </article>
                 </li>
               );

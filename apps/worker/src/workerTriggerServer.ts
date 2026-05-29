@@ -3,7 +3,9 @@ import http from 'node:http';
 import { workerLog } from './log.js';
 import type { WorkerScheduler } from './scheduler.js';
 import { handleIngestPostingRequest } from './workerIngestPostingHandler.js';
+import { handleAskRunLogStreamRequest } from './ranking/askRunLogStream.js';
 import { handleRankRunLogStreamRequest } from './ranking/rankRunLogStream.js';
+import { handleAskPostingRequest } from './workerAskPostingHandler.js';
 import { handleRankPostingRequest, handleRankPostingsRequest } from './workerRankPostingHandler.js';
 
 const corsTrigger: Record<string, string> = {
@@ -21,6 +23,8 @@ const corsJson: Record<string, string> = {
  * Local-only HTTP trigger: `GET /scheduler` returns scheduler JSON; `POST /trigger` runs one scheduler tick;
  * `POST /rank-posting` scores one posting and `POST /rank-postings` scores multiple postings in one batch via Cursor CLI;
  * `GET /rank-logs?rankingRunId=…` streams `llm.rank.*` logs for a scoring run (SSE, used by the Postings score dialog);
+ * `POST /ask-posting` answers a question about one posting via Cursor CLI;
+ * `GET /ask-logs?askRunId=…` streams `llm.ask.*` logs for a Q&A run (SSE, Postings Ask panel);
  * `POST /ingest-posting` upserts captured job postings (e.g. from the oc-job-capture browser extension).
  * Binds `127.0.0.1` only.
  */
@@ -36,8 +40,10 @@ export function startWorkerTriggerServer(
         req.url === '/scheduler' ||
         req.url === '/rank-posting' ||
         req.url === '/rank-postings' ||
+        req.url === '/ask-posting' ||
         req.url === '/ingest-posting' ||
-        req.url?.startsWith('/rank-logs'))
+        req.url?.startsWith('/rank-logs') ||
+        req.url?.startsWith('/ask-logs'))
     ) {
       res.writeHead(204, corsTrigger);
       res.end();
@@ -71,6 +77,14 @@ export function startWorkerTriggerServer(
       handleRankRunLogStreamRequest(req, res);
       return;
     }
+    if (req.method === 'GET' && req.url?.startsWith('/ask-logs')) {
+      handleAskRunLogStreamRequest(req, res);
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/ask-posting') {
+      void handleAskPostingRequest({ convexUrl: options.convexUrl, req, res });
+      return;
+    }
     if (req.method === 'POST' && req.url === '/rank-posting') {
       void handleRankPostingRequest({ convexUrl: options.convexUrl, req, res });
       return;
@@ -90,7 +104,16 @@ export function startWorkerTriggerServer(
   server.listen(port, '127.0.0.1', () => {
     workerLog.info('worker.trigger_http', {
       port,
-      paths: ['/scheduler', '/trigger', '/rank-posting', '/rank-postings', '/rank-logs', '/ingest-posting'],
+      paths: [
+        '/scheduler',
+        '/trigger',
+        '/rank-posting',
+        '/rank-postings',
+        '/rank-logs',
+        '/ask-posting',
+        '/ask-logs',
+        '/ingest-posting',
+      ],
       bind: '127.0.0.1',
     });
   });

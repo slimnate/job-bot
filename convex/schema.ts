@@ -2,7 +2,7 @@ import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { dimensionScoresPartialValidator } from './rankingValidators.js';
 
-export const schemaVersion = 'worker_settings_env';
+export const schemaVersion = 'posting_questions';
 
 export default defineSchema({
   job_evaluators: defineTable({
@@ -130,6 +130,22 @@ export default defineSchema({
     .index('by_posting', ['postingId'])
     .index('by_posting_ranked_at', ['postingId', 'rankedAt'])
     .index('by_score', ['scoreOverall']),
+
+  /**
+   * Per-posting Q&A history from the Postings page “Ask about this job” panel.
+   */
+  posting_questions: defineTable({
+    postingId: v.id('job_postings'),
+    question: v.string(),
+    answer: v.string(),
+    /** Catalog provider key, e.g. `openai`, `cursor`. */
+    providerKey: v.string(),
+    /** API / CLI model id passed to the provider. */
+    model: v.string(),
+    status: v.union(v.literal('completed'), v.literal('failed')),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index('by_posting_created_at', ['postingId', 'createdAt']),
 
   /**
    * User-managed source enablement state; accepted criteria fields remain code-defined.

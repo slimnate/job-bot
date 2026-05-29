@@ -12,7 +12,8 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - **paginated list** via `postings.listPage` with **page navigation** (prev/next, page X of Y) and **rows per page** at the bottom; header shows matching count vs database total
   - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), **server-truncated** description preview (~140 chars) with **Show full description** (lazy `postings.getDescription`), ranking details: **compact rubric strip** from `dimensionScoresJson`, **matched / unmet / red flag** pills from list payload, **Show full scoring table** (lazy `ranking.getLatestReasoning` — full GFM table + details)
   - filters: `postings.listPage` supports `rankStatus` (`ranked` | `unranked`) in addition to text search, source, `minScore`, and sort (`scoreDesc`, `rankedAtDesc`, `discoveredAtDesc`, `postedAtDesc`). Free-text search scans full descriptions server-side but returns truncated snippets on the wire (slower on large tables).
-  - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, `Delete`), multi-select checkboxes (larger click targets), bulk `Score selected` / `Delete selected`, and `Clear All`
+  - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, **`Ask`** / **`Ask (N)`** — inline Q&A about the posting, `Delete`), multi-select checkboxes (larger click targets), bulk `Score selected` / `Delete selected`, and `Clear All`
+  - **Ask about this job** (`PostingAskPanel.tsx`): expand inline per row (not a modal). Pick **provider** + **model** (same catalog as Score), type a question, view persisted history. Answers render as **GitHub-flavored markdown**. **OpenAI** path uses Convex `postingQuestions.askHttp`; **Cursor** path uses worker `POST /ask-posting` with live **`GET /ask-logs`** SSE (same `VITE_WORKER_TRIGGER_URL` base as Score). Evaluator context for prompts is resolved automatically (source default evaluator → `WORKER_DEFAULT_EVALUATOR_ID`). Defaults: Settings `LLM_QA_PROVIDER` / `LLM_QA_MODEL` (fall back to ranking provider/model), with last picker stored in `localStorage`.
   - bulk score uses **fixed-size chunks** (default **3 postings** per LLM/CLI request); global rank is merged by `scoreOverall` after all chunks succeed
 - **View** modal loads `postings.getDetail` (full posting + latest ranking + raw JSON), including latest reasoning summary rendered as markdown
 - Workers (`/workers`) scheduler status (`WorkerSchedulerPanel` → reactive Convex `worker_scheduler_status`) and a unified **queue + schedules** panel (`apps/web/src/components/WorkerQueuePanel.tsx`) plus history (`apps/web/src/components/HistoryViewer.tsx`) with:
@@ -88,7 +89,8 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `job_postings`: normalized postings deduplicated by source + external id; optional denormalized `latestScoreOverall` / `latestRankedAt` for indexed list sort/filter (patched on `ranking.upsertResults`; backfill with `npm run backfill:postings-denorm`)
 - `job_rankings`: per-posting scoring outputs (`scoreOverall`, reasoning, criteria match, red flags) linked by `evaluatorId` — no `rank` field
 - `ranking_llm_providers`: stable `key`, `displayName`, `surface` (`convex_http` = OpenAI-compatible call from Convex; `worker_cursor` = Cursor CLI on the worker), `sortOrder`
-- `ranking_llm_models`: `providerKey`, `apiModelId`, `displayName`, `sortOrder` (options shown in the Score dialog)
+- `ranking_llm_models`: `providerKey`, `apiModelId`, `displayName`, `sortOrder` (options shown in the Score and Ask panels)
+- `posting_questions`: per-posting Q&A history (`question`, `answer`, `providerKey`, `model`, `status`, optional `errorMessage`, `createdAt`); deleted when the posting is removed
 - `app_settings`: global scope singleton (`values` map of string settings for the Settings page)
 - `worker_settings_env`: per-`workerId` snapshot of allowlisted env vars from the worker process (`envOverrides`, `reportedAt`)
 
@@ -149,6 +151,7 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.rankingLlmCatalog.replaceCatalog` (mutation: full replace of catalog; used by `populate:ranking-catalog`)
 - `api.rankingLlmCatalog.seedCursorCliModelsCatalog` (mutation: delete all `cursor` model rows, insert 111 Cursor CLI models from `@job-bot/shared`; OpenAI rows unchanged)
 - `api.rankingScorePosting.scoreOnePosting` (Convex **action**: OpenAI / compatible HTTP path only; writes `job_rankings`; Cursor uses worker `POST /rank-posting`)
+- `api.postingQuestions.listForPosting`, `api.postingQuestions.countForPostings`, `api.postingQuestions.askHttp` (HTTP Q&A), `api.postingQuestions.saveAnswer` (also used by the worker after Cursor Q&A)
 - `api.appSettings.get`
 - `api.appSettings.getForUi`
 - `api.appSettings.upsert`
@@ -204,7 +207,7 @@ Most tuning vars are editable on the **Settings** page (stored in `app_settings`
 
 Examples you can set in the UI (see in-app hints for full detail): `WORKER_CRON_INTERVAL_MINUTES`, `WORKER_QUEUE_CONCURRENCY`, `WORKER_USE_CHROME`, `WORKER_LINKEDIN_PAGES`, `LLM_RANKING_PROVIDER`, `LLM_RANKING_MODEL`, `VITE_WORKER_TRIGGER_URL` (also overridable via `import.meta.env` in the browser), and others listed in `packages/shared/src/settings/appSettingDefinitions.ts`.
 
-`VITE_WORKER_TRIGGER_URL`: URL for **Trigger now** and Cursor **Score** (`POST …/rank-posting`). Must match `WORKER_HTTP_TRIGGER_PORT`. Set in Settings (seeded from system defaults on first run), `.env.local`, or Vite (`VITE_*` wins in the browser when set at build/dev time). There is no hardcoded URL fallback in the web app.
+`VITE_WORKER_TRIGGER_URL`: URL for **Trigger now**, Cursor **Score** (`POST …/rank-posting`), and Cursor **Ask** (`POST …/ask-posting`, `GET …/ask-logs`). Must match `WORKER_HTTP_TRIGGER_PORT`. Set in Settings (seeded from system defaults on first run), `.env.local`, or Vite (`VITE_*` wins in the browser when set at build/dev time). There is no hardcoded URL fallback in the web app.
 
 #### Legacy env reference (same keys as Settings)
 
@@ -219,7 +222,7 @@ Worker-specific optional env vars (all overridable from Settings unless listed a
 - `WORKER_CHROME_PORT` (default: `9222`)
 - `WORKER_MANAGE_CHROME` (default: `true`; set `0` to attach to an already running Chrome with remote debugging on `WORKER_CHROME_PORT`)
 - `WORKER_AUTO_CLEANUP_CHROME` (default: `true`; set `0` during debugging to keep the Chrome worker instance alive across LinkedIn runs instead of auto-closing/detaching after each run)
-- `WORKER_HTTP_TRIGGER_PORT` (optional): when set (e.g. `3999`), the worker listens on `127.0.0.1` for `GET /scheduler` (JSON status for the dashboard), `POST /trigger`, `POST /rank-posting` / `POST /rank-postings` (manual Cursor CLI score from the Postings page), and `POST /ingest-posting` (browser extension / manual capture ingest). Root `npm run dev:all` sets `3999` on the worker leg. These routes are **dev-only**: unauthenticated, bound to `127.0.0.1`, with CORS `*` for local tools.
+- `WORKER_HTTP_TRIGGER_PORT` (optional): when set (e.g. `3999`), the worker listens on `127.0.0.1` for `GET /scheduler` (JSON status for the dashboard), `POST /trigger`, `POST /rank-posting` / `POST /rank-postings` (manual Cursor CLI score from the Postings page), `POST /ask-posting` and `GET /ask-logs?askRunId=…` (Cursor CLI Q&A from the Postings Ask panel), and `POST /ingest-posting` (browser extension / manual capture ingest). Root `npm run dev:all` sets `3999` on the worker leg. These routes are **dev-only**: unauthenticated, bound to `127.0.0.1`, with CORS `*` for local tools.
 - `WORKER_LINKEDIN_PAGES` (default: `3`): how many LinkedIn results **pages** (pagination “Next”) the in-browser scraper will attempt per run, minimum `1`, maximum `10`. Invalid values fall back to the default; values above the cap are clamped with a worker warning.
 - `WORKER_LINKEDIN_MAX_POSTINGS` (optional, default: unlimited): positive integer cap for total LinkedIn postings collected in a run. When set, the browser-side scraper stops after hitting the cap, live stream upserts also stop at the same threshold, and final postings output is capped for consistency. Invalid values are ignored with a worker warning.
 
@@ -271,6 +274,10 @@ For `http` provider mode:
 
 **Live ranking logs (Postings score dialog):** For Cursor scoring, the web UI generates a **`rankingRunId`**, opens **`GET /rank-logs?rankingRunId=…`** (SSE), then **`POST /rank-posting(s)`** with the same id. The worker mirrors every **`llm.rank.*`** log line (including `llm.rank.run.begin` / `llm.rank.run.end`) into that stream while the run is active.
 
+**Ask posting (Postings Ask panel):** **`POST /ask-posting`** with `{ postingId, question, providerKey, model }`. The worker loads Q&A context from Convex, runs Cursor CLI, and persists the answer via `postingQuestions.saveAnswer`. The UI shows the submitted question immediately and a “Thinking…” indicator until the saved answer appears in the thread.
+
+**Settings → Ranking:** `LLM_QA_PROVIDER` (catalog key, e.g. `openai` or `cursor`; empty → derived from `LLM_RANKING_PROVIDER`) and `LLM_QA_MODEL` (empty → `LLM_RANKING_MODEL` or `LLM_RANKING_CURSOR_MODEL` depending on provider surface).
+
 **Ranking vs saving:** The worker runs `cursor-agent` first, then calls Convex **`ranking.upsertResults`**. If you see **`llm.rank.success`** followed by **`rank_posting.save_failed`** or **`fetch failed`** on `ranking.upsertResults`, the model output was parsed correctly but the worker could not reach your deployment — confirm **`CONVEX_URL`** in `.env.local`, keep **`npx convex dev`** running, and check network/DNS to `*.convex.cloud`. The Postings UI will show the computed score with a save error when that happens.
 
 **Schema note:** `job_rankings` no longer stores `rank`. After deploying the schema change in dev, clear stale rows (Postings **Clear All**, or `postings.clearAll`) so old documents with `rank` do not linger.
@@ -293,7 +300,11 @@ Re-score postings if you want matched/unmet badges on rows that previously store
 
 Use your normal Convex workflow (for example, `npx convex dev`) so generated API types stay current.
 
-**Postings page → Score:** choose **OpenAI** (Convex action `api.rankingScorePosting.scoreOnePosting`) or **Cursor CLI** (browser `fetch` to the worker `POST /rank-posting`). Populate provider/model rows with `npm run populate:ranking-catalog` (see script header for env vars), or refresh only Cursor models:
+**Postings page → Score:** choose **OpenAI** (Convex action `api.rankingScorePosting.scoreOnePosting`) or **Cursor CLI** (browser `fetch` to the worker `POST /rank-posting`).
+
+**Postings page → Ask:** expand **Ask** on a row; same provider/model catalog as Score. **OpenAI** uses `api.postingQuestions.askHttp` (`OPENAI_API_KEY` on Convex). **Cursor** uses `POST /ask-posting` on the local worker. Prior Q&A on that posting is included in the prompt (last 10 completed turns). Answers are stored in `posting_questions` and rendered as markdown in the history list.
+
+Populate provider/model rows with `npm run populate:ranking-catalog` (see script header for env vars), or refresh only Cursor models:
 
 ```bash
 npx convex run rankingLlmCatalog:seedCursorCliModelsCatalog

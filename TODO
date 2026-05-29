@@ -1,17 +1,18 @@
 Make chrome worker use a profile or something similar so that the worker does not have to log in to linkedin every time. We are sometimes hitting a captcha check that will block the worker without manual intervention.
 
-Create recurring schedule entries for workers.
-
 Examine tests created, document test suite, make sure tests (specifically linkedin related) aren't doing lots of unnecessary work.
 
+Feature to create cover letter outline for posting.
+
 Add ability to archive postings, and a page to view archived postings. I may want to periodically examine archived postings that were a good fit to see if there are more new postings from the same employer that I can check on. Maybe add options to archive with a status of "good" or "bad" so that I can filter archived postings as well, and potentially use the archived postings to inform future rankings.
+
+Application status tracking
 
 Notifications
 
 Optimize README for human consumption
 
-"Ask bout this job" feature. On postings page, provide a question input box that the user can use to ask a question about the posting. Let's hide it by default behind some sort of button. Save the history of asked questions and answers. Make the button that shows the question dialog box and history show the user if there is any previous question history (show number of questions asked)
-
+Wizard to create a scoring rubric for any generic type of job the user could want
 
 on the workers page queue dialog, lets show the user what the default evaluator for the source is in the dropdown.
 - If the source has an evaluator: "Source default (<preset name>)"

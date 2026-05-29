@@ -129,11 +129,8 @@ export function stripCliModeArgs(args: string[]): string[] {
   return out;
 }
 
-/**
- * Forces `--output-format json` for ranking (removes text/stream-json output-format flags).
- */
-export function enforceRankingJsonOutputFormat(args: string[]): string[] {
-  const withoutOutputFormat: string[] = [];
+function stripCliOutputFormatArgs(args: string[]): string[] {
+  const out: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
     if (arg === '--output-format' || arg === '-o') {
@@ -143,8 +140,16 @@ export function enforceRankingJsonOutputFormat(args: string[]): string[] {
     if (arg.startsWith('--output-format=')) {
       continue;
     }
-    withoutOutputFormat.push(arg);
+    out.push(arg);
   }
+  return out;
+}
+
+/**
+ * Forces `--output-format json` for ranking (removes text/stream-json output-format flags).
+ */
+export function enforceRankingJsonOutputFormat(args: string[]): string[] {
+  const withoutOutputFormat = stripCliOutputFormatArgs(args);
   if (!hasCliArgFlag(withoutOutputFormat, '--output-format')) {
     withoutOutputFormat.push('--output-format', 'json');
   }
@@ -160,9 +165,17 @@ export function enforceRankingJsonOutputFormat(args: string[]): string[] {
 export function buildCursorCliArgs(
   config: CursorCliConfig,
   prompt: string,
-  options: { minimalContext?: boolean; useDefaultAgentMode?: boolean } = {}
+  options: {
+    minimalContext?: boolean;
+    useDefaultAgentMode?: boolean;
+    /** When false, omit `--output-format json` (used for plain-text Q&A). Default true. */
+    jsonOutput?: boolean;
+  } = {}
 ): string[] {
-  let args = enforceRankingJsonOutputFormat([...config.args]);
+  let args =
+    options.jsonOutput === false
+      ? stripCliOutputFormatArgs([...config.args])
+      : enforceRankingJsonOutputFormat([...config.args]);
   const minimal = options.minimalContext ?? true;
   const useDefaultAgentMode = options.useDefaultAgentMode ?? false;
 

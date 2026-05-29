@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { Id } from './convexBridge/doc.js';
+import { mirrorAskRunLogToHub } from './ranking/askRunContext.js';
 import { mirrorRankRunLogToHub } from './ranking/rankRunContext.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -64,6 +65,7 @@ function writeLine(level: LogLevel, message: string, fields: LogFields): void {
   };
   const line = JSON.stringify(entry);
   mirrorRankRunLogToHub(level, message, fields, entry.ts as string);
+  mirrorAskRunLogToHub(level, message, fields, entry.ts as string);
   const store = runLogAls.getStore();
   if (store) {
     store.pending.push({ seq: store.nextSeq++, line });

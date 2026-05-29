@@ -244,6 +244,24 @@ export const APP_SETTING_DEFINITIONS: readonly AppSettingDefinition[] = [
     section: 'ranking',
   }),
   settingDef({
+    key: 'LLM_QA_PROVIDER',
+    label: 'Default Q&A provider',
+    hint:
+      'Catalog provider key for “Ask about this job” (e.g. openai or cursor). Empty falls back from LLM_RANKING_PROVIDER (http→openai, cursor→cursor). The Postings Ask panel can override per question.',
+    type: 'string',
+    section: 'ranking',
+    optional: true,
+  }),
+  settingDef({
+    key: 'LLM_QA_MODEL',
+    label: 'Default Q&A model',
+    hint:
+      'Model id for the chosen Q&A provider. Empty uses LLM_RANKING_MODEL (HTTP/openai) or LLM_RANKING_CURSOR_MODEL (Cursor). LLM_QA_MODEL in env overrides this field.',
+    type: 'string',
+    section: 'ranking',
+    optional: true,
+  }),
+  settingDef({
     key: 'LLM_RANKING_TIMEOUT_MS',
     label: 'Ranking base timeout (ms)',
     hint:

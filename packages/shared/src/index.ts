@@ -11,5 +11,7 @@ export * from './ranking/rankingJsonSchema.js';
 export * from './ranking/validateIndividualScores.js';
 export * from './ranking/rankingCursorBatch.js';
 export * from './ranking/cursorCliCatalog.js';
+export * from './postingQa/postingQaSystemMessage.js';
+export * from './postingQa/buildPostingQaPrompt.js';
 
 export const sharedVersion = 'shared-v1';
