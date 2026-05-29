@@ -11,7 +11,23 @@ type SourceRow = {
   acceptedCriteriaFields: string[];
   criteriaFieldMeta?: Record<string, CriteriaFieldMeta>;
   isEnabled: boolean;
+  defaultEvaluatorId?: Id<'job_evaluators'>;
 };
+
+/**
+ * Label for the empty evaluator option: shows which profile the source uses by default.
+ */
+function formatSourceDefaultEvaluatorLabel(
+  sourceRow: SourceRow | undefined,
+  evaluatorNameById: Map<string, string>
+): string {
+  const defaultId = sourceRow?.defaultEvaluatorId;
+  if (!defaultId) {
+    return 'Source default (none)';
+  }
+  const name = evaluatorNameById.get(defaultId);
+  return `Source default (${name ?? 'unknown'})`;
+}
 
 /**
  * What the dialog is editing, if anything:
@@ -66,8 +82,16 @@ export function WorkerRunDialog({ open, target, onClose, onSaved }: WorkerRunDia
 
   const enabledSources = useMemo(() => sources.filter((row) => row.isEnabled), [sources]);
   const activeEvaluators = useMemo(() => evaluators.filter((row) => row.isActive), [evaluators]);
+  const evaluatorNameById = useMemo(
+    () => new Map(evaluators.map((row) => [row._id, row.name])),
+    [evaluators]
+  );
   const sourceByKey = useMemo(() => new Map(sources.map((row) => [row.source, row])), [sources]);
   const selectedSource = sourceByKey.get(source);
+  const sourceDefaultEvaluatorLabel = useMemo(
+    () => formatSourceDefaultEvaluatorLabel(selectedSource, evaluatorNameById),
+    [selectedSource, evaluatorNameById]
+  );
   const sourceFields = selectedSource?.acceptedCriteriaFields ?? [];
   const sourceFieldMeta = selectedSource?.criteriaFieldMeta;
 
@@ -311,7 +335,7 @@ export function WorkerRunDialog({ open, target, onClose, onSaved }: WorkerRunDia
         <label>
           Evaluator (optional)
           <select value={evaluatorId} onChange={(event) => setEvaluatorId(event.target.value)}>
-            <option value=''>Source / worker default</option>
+            <option value=''>{sourceDefaultEvaluatorLabel}</option>
             {activeEvaluators.map((row) => (
               <option key={row._id} value={row._id}>
                 {row.name}

@@ -14,7 +14,4 @@ Wizard to create a scoring rubric for any generic type of job the user could wan
 
 Review system prompts and make modifications as necessary
 
-on the workers page queue dialog, lets show the user what the default evaluator for the source is in the dropdown.
-- If the source has an evaluator: "Source default (<preset name>)"
-- If the source does not have an evaluator: "Source default (none)" -
 
