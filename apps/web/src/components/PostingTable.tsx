@@ -41,6 +41,40 @@ function formatAskQuestionCountSuffix(count: number): string {
   return count === 1 ? ' · 1 question' : ` · ${count} questions`;
 }
 
+type PostingExpandToggleProps = {
+  expanded: boolean;
+  onToggle: () => void;
+  expandLabel: string;
+  collapseLabel: string;
+  expandAriaLabel: string;
+  collapseAriaLabel: string;
+};
+
+/** Compact expand/collapse control with chevron; verbose labels live in aria-label only. */
+function PostingExpandToggle({
+  expanded,
+  onToggle,
+  expandLabel,
+  collapseLabel,
+  expandAriaLabel,
+  collapseAriaLabel,
+}: PostingExpandToggleProps) {
+  return (
+    <button
+      type='button'
+      className={['posting-expand-toggle', expanded ? 'posting-expand-toggle--expanded' : '']
+        .filter(Boolean)
+        .join(' ')}
+      onClick={onToggle}
+      aria-expanded={expanded}
+      aria-label={expanded ? collapseAriaLabel : expandAriaLabel}
+    >
+      <span className='posting-expand-toggle__label'>{expanded ? collapseLabel : expandLabel}</span>
+      <span className='posting-expand-toggle__chevron' aria-hidden='true' />
+    </button>
+  );
+}
+
 const getScoreColorClass = (score?: number | null): string => {
   if (typeof score !== 'number' || Number.isNaN(score)) {
     return 'posting-item__score--neutral';
@@ -113,14 +147,14 @@ function PostingDescription({ postingId, descriptionSnippet }: PostingDescriptio
         <p className='posting-item__description-text'>{displayText}</p>
       )}
       {isTruncated ? (
-        <button
-          type='button'
-          className='posting-item__description-toggle'
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-        >
-          {expanded ? 'Show less' : 'Show full description'}
-        </button>
+        <PostingExpandToggle
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+          expandLabel='More'
+          collapseLabel='Less'
+          expandAriaLabel='Show full job description'
+          collapseAriaLabel='Show less of job description'
+        />
       ) : null}
     </div>
   );
@@ -281,14 +315,14 @@ function RankingDetails({ postingId, ranking }: RankingDetailsProps) {
       ) : hasCompactScores ? (
         <DimensionScoresCompactTable scores={dimensionScores!} getScoreColorClass={getScoreColorClass} />
       ) : null}
-      <button
-        type='button'
-        className='posting-item__description-toggle'
-        onClick={() => setScoringExpanded((v) => !v)}
-        aria-expanded={scoringExpanded}
-      >
-        {scoringExpanded ? 'Hide full scoring table' : 'Show full scoring table'}
-      </button>
+      <PostingExpandToggle
+        expanded={scoringExpanded}
+        onToggle={() => setScoringExpanded((v) => !v)}
+        expandLabel='Full scores'
+        collapseLabel='Summary'
+        expandAriaLabel='Show full scoring breakdown'
+        collapseAriaLabel='Show compact scoring summary'
+      />
       <CollapsibleBadgeRow ariaLabel='Green flags' items={matchedItems} badgeClass='matched' />
       <CollapsibleBadgeRow ariaLabel='Yellow flags' items={unmetItems} badgeClass='unmet' />
       <CollapsibleBadgeRow ariaLabel='Red flags' items={redFlagItems} badgeClass='red' />

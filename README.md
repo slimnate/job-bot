@@ -10,7 +10,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - humanized discovered timestamps (same-day time, older relative age)
   - **sticky toolbar** (below the nav): search, source (always lists all configured sources), **rank status** (all / ranked only / unranked only), min score, sort, **rows per page** (10 / 20 / 50 / 100, default 20, persisted in `localStorage`), **Select all visible**, bulk **Score selected** / **Delete selected** — stays visible while scrolling the list
   - **paginated list** via `postings.listPage` with **page navigation** (prev/next, page X of Y) and **rows per page** at the bottom; header shows matching count vs database total
-  - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), **server-truncated** description preview (~140 chars) with **Show full description** (lazy `postings.getDescription`), ranking details: **compact rubric strip** from `dimensionScoresJson`, **matched / unmet / red flag** pills from list payload, **Show full scoring table** (lazy `ranking.getLatestReasoning` — full GFM table + details)
+  - postings shown as a **list** (`PostingTable.tsx`): compact meta row (color-coded score, styled external title link, source, location, ranked/discovered, actions), **server-truncated** description preview (~140 chars) with **More** / **Less** (lazy `postings.getDescription`), ranking details: **compact rubric strip** from `dimensionScoresJson`, **matched / unmet / red flag** pills from list payload, **Full scores** / **Summary** (lazy `ranking.getLatestReasoning` — full GFM table + details)
   - filters: `postings.listPage` supports `rankStatus` (`ranked` | `unranked`) in addition to text search, source, `minScore`, and sort (`scoreDesc`, `rankedAtDesc`, `discoveredAtDesc`, `postedAtDesc`). Free-text search scans full descriptions server-side but returns truncated snippets on the wire (slower on large tables).
   - per-item actions (`View`, **`Score`** — criteria + **provider** (OpenAI via Convex vs **Cursor CLI** on the local worker) + **model** from the Convex catalog, **`Ask`** / **`Ask (N)`** — inline Q&A about the posting, `Delete`), multi-select checkboxes (larger click targets), bulk `Score selected` / `Delete selected`, and `Clear All`
   - **Ask about this job** (`PostingAskPanel.tsx`): expand inline per row (not a modal). Pick **provider** + **model** (same catalog as Score), type a question, view persisted history. Answers render as **GitHub-flavored markdown**. **OpenAI** path uses Convex `postingQuestions.askHttp`; **Cursor** path uses worker `POST /ask-posting` with live **`GET /ask-logs`** SSE (same `VITE_WORKER_TRIGGER_URL` base as Score). Evaluator context for prompts is resolved automatically (source default evaluator → `WORKER_DEFAULT_EVALUATOR_ID`). Defaults: Settings `LLM_QA_PROVIDER` / `LLM_QA_MODEL` (fall back to ranking provider/model), with last picker stored in `localStorage`.
@@ -165,8 +165,8 @@ Each `listPage` row includes posting `_id`, `title`, `company`, `url`, `location
 
 | User action | Query |
 |-------------|--------|
-| Show full description | `postings.getDescription` |
-| Show full scoring table | `ranking.getLatestReasoning` |
+| Description **More** / **Less** | `postings.getDescription` |
+| Scoring **Full scores** / **Summary** | `ranking.getLatestReasoning` |
 | View modal | `postings.getDetail` |
 
 `paginationOpts.numItems` is capped at **100** server-side. Default UI page size is **20** (user-selectable 10 / 20 / 50 / 100).
