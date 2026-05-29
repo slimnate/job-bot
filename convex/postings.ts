@@ -47,13 +47,18 @@ export const list = query({
         v.literal('discoveredAtDesc'),
         v.literal('rankedAtDesc'),
         v.literal('postedAtDesc'),
-        v.literal('scoreDesc')
+        v.literal('scoreDesc'),
+        v.literal('archivedAtDesc')
       )
     ),
     limit: v.optional(v.number()),
     rankStatus: v.optional(v.union(v.literal('ranked'), v.literal('unranked'))),
+    archiveVisibility: v.optional(
+      v.union(v.literal('active'), v.literal('archived'), v.literal('good'), v.literal('bad'))
+    ),
   },
   handler: async (ctx, args) => {
+    const visibility = args.archiveVisibility ?? 'active';
     const sourceFiltered = args.source
       ? await ctx.db
           .query('job_postings')
@@ -90,6 +95,18 @@ export const list = query({
       if (args.rankStatus === 'unranked' && latestRanking) {
         continue;
       }
+      if (visibility === 'active' && posting.archivedAt !== undefined) {
+        continue;
+      }
+      if (visibility === 'archived' && posting.archivedAt === undefined) {
+        continue;
+      }
+      if (visibility === 'good' && posting.archiveLabel !== 'good') {
+        continue;
+      }
+      if (visibility === 'bad' && posting.archiveLabel !== 'bad') {
+        continue;
+      }
 
       postingsWithRanking.push({
         ...posting,
@@ -99,6 +116,9 @@ export const list = query({
 
     const sortBy = args.sort ?? 'discoveredAtDesc';
     postingsWithRanking.sort((a, b) => {
+      if (sortBy === 'archivedAtDesc') {
+        return (b.archivedAt ?? -1) - (a.archivedAt ?? -1);
+      }
       if (sortBy === 'scoreDesc') {
         return (b.latestRanking?.scoreOverall ?? -1) - (a.latestRanking?.scoreOverall ?? -1);
       }
@@ -123,7 +143,7 @@ export const count = query({
   args: {},
   handler: async (ctx) => {
     const postings = await ctx.db.query('job_postings').collect();
-    return postings.length;
+    return postings.filter((posting) => posting.archivedAt === undefined).length;
   },
 });
 

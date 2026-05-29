@@ -19,7 +19,7 @@ export function DashboardHome() {
           Overview of your highest-scored job postings.{' '}
           {totalPostings !== undefined ? (
             <span className='dashboard-count'>
-              <strong>{totalPostings}</strong> total {totalPostings === 1 ? 'posting' : 'postings'} in the database.
+              <strong>{totalPostings}</strong> active {totalPostings === 1 ? 'posting' : 'postings'} in the database.
             </span>
           ) : (
             <span className='dashboard-count-muted'>Loading count…</span>
@@ -28,7 +28,7 @@ export function DashboardHome() {
         <ul className='dashboard-links'>
           <li>
             <Link to='/postings'>All ranked postings</Link>
-            <span className='dashboard-links-hint'>Search, filter, and sort the full list.</span>
+            <span className='dashboard-links-hint'>Search, filter, archive, and sort the full list.</span>
           </li>
           <li>
             <Link to='/evaluators'>Evaluators</Link>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAction, useMutation, useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
@@ -7,9 +8,11 @@ import { FilterSelect } from './FilterSelect';
 import { useWorkerTriggerUrl } from '../hooks/useWorkerTriggerUrl.js';
 import { formatRankRunLogLine, subscribeRankRunLogs } from '../rankRunLog.js';
 import { PostingTable, type PostingTableRow } from './PostingTable';
+import { ArchiveLabelSplitButton } from './ArchiveLabelSplitButton';
 
-type PostingSort = 'discoveredAtDesc' | 'rankedAtDesc' | 'postedAtDesc' | 'scoreDesc';
+type PostingSort = 'discoveredAtDesc' | 'rankedAtDesc' | 'postedAtDesc' | 'scoreDesc' | 'archivedAtDesc';
 type PostingRankStatus = 'all' | 'ranked' | 'unranked';
+type PostingArchiveVisibility = 'active' | 'archived' | 'good' | 'bad';
 
 type LlmCatalogProvider = {
   key: string;
@@ -33,6 +36,7 @@ function readStoredPageSize(): PageSizeOption {
 }
 
 export function PostingViewer() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const workerTriggerUrl = useWorkerTriggerUrl();
   const workerTriggerBaseUrl = useMemo(() => {
     if (!workerTriggerUrl) {
@@ -48,6 +52,9 @@ export function PostingViewer() {
   const llmCatalog = useQuery(api.rankingLlmCatalog.listForUi) as LlmCatalogProvider[] | undefined;
   const deletePosting = useMutation(api.postings.deleteOne);
   const clearAllPostings = useMutation(api.postings.clearAll);
+  const archivePosting = useMutation(api.postingArchive.archive);
+  const unarchivePosting = useMutation(api.postingArchive.unarchive);
+  const updateArchiveLabel = useMutation(api.postingArchive.updateArchiveLabel);
   const scoreOnePosting = useAction(api.rankingScorePosting.scoreOnePosting);
   const scorePostingsBatch = useAction(api.rankingScorePosting.scorePostingsBatch);
   const [postingQuery, setPostingQuery] = useState('');
@@ -55,8 +62,18 @@ export function PostingViewer() {
   const [postingSort, setPostingSort] = useState<PostingSort>('scoreDesc');
   const [postingMinScore, setPostingMinScore] = useState('');
   const [postingRankStatus, setPostingRankStatus] = useState<PostingRankStatus>('all');
+  const [postingArchiveVisibility, setPostingArchiveVisibility] = useState<PostingArchiveVisibility>(
+    () => {
+      const fromUrl = searchParams.get('archive');
+      if (fromUrl === 'archived' || fromUrl === 'good' || fromUrl === 'bad') {
+        return fromUrl;
+      }
+      return 'active';
+    }
+  );
   const [postingMessage, setPostingMessage] = useState('');
   const [deletingPostingId, setDeletingPostingId] = useState<string | null>(null);
+  const [archiveBusyPostingId, setArchiveBusyPostingId] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
   const [selectedPostingIds, setSelectedPostingIds] = useState<Set<string>>(new Set());
   const [scoreTargets, setScoreTargets] = useState<PostingTableRow[]>([]);
@@ -78,10 +95,21 @@ export function PostingViewer() {
       minScore: postingMinScore.trim() ? Number(postingMinScore) : undefined,
       sort: postingSort,
       rankStatus: postingRankStatus === 'all' ? undefined : postingRankStatus,
+      archiveVisibility: postingArchiveVisibility,
       pageSize: postingPageSize,
     }),
-    [postingQuery, postingSource, postingMinScore, postingSort, postingRankStatus, postingPageSize]
+    [
+      postingQuery,
+      postingSource,
+      postingMinScore,
+      postingSort,
+      postingRankStatus,
+      postingArchiveVisibility,
+      postingPageSize,
+    ]
   );
+
+  const viewingArchived = postingArchiveVisibility !== 'active';
 
   const resetPagination = () => {
     setPageIndex(0);
@@ -91,6 +119,15 @@ export function PostingViewer() {
   useEffect(() => {
     resetPagination();
   }, [listFilters]);
+
+  useEffect(() => {
+    if (viewingArchived && postingSort !== 'archivedAtDesc') {
+      setPostingSort('archivedAtDesc');
+    }
+    if (!viewingArchived && postingSort === 'archivedAtDesc') {
+      setPostingSort('scoreDesc');
+    }
+  }, [viewingArchived, postingSort]);
 
   const pageCursor = pageCursorsRef.current[pageIndex] ?? null;
 
@@ -112,6 +149,18 @@ export function PostingViewer() {
 
   const postings = pageResult?.page ?? [];
   const postingsLoading = pageResult === undefined;
+
+  const archivedCompanies = useMemo(() => {
+    if (!viewingArchived || !postings.length) {
+      return [];
+    }
+    return [...new Set(postings.map((posting) => posting.company))];
+  }, [viewingArchived, postings]);
+
+  const activeCompanyCounts = useQuery(
+    api.postingArchive.countActiveForCompanies,
+    archivedCompanies.length ? { companies: archivedCompanies } : 'skip'
+  );
 
   const postingIdsForCounts = useMemo(
     () => (postings.length ? postings.map((p) => p._id) : []),
@@ -404,6 +453,90 @@ export function PostingViewer() {
     }
   };
 
+  const onArchivePosting = async (
+    posting: PostingTableRow,
+    label: 'good' | 'bad'
+  ) => {
+    setArchiveBusyPostingId(posting._id);
+    setPostingMessage('');
+    try {
+      await archivePosting({ postingId: posting._id, label });
+      setPostingMessage(`Archived '${posting.title}' as ${label}.`);
+      setSelectedPostingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(posting._id);
+        return next;
+      });
+    } catch (error) {
+      setPostingMessage(
+        error instanceof Error ? `Could not archive posting: ${error.message}` : 'Could not archive posting.'
+      );
+    } finally {
+      setArchiveBusyPostingId(null);
+    }
+  };
+
+  const onUnarchivePosting = async (posting: PostingTableRow) => {
+    setArchiveBusyPostingId(posting._id);
+    setPostingMessage('');
+    try {
+      await unarchivePosting({ postingId: posting._id });
+      setPostingMessage(`Restored '${posting.title}' to active postings.`);
+    } catch (error) {
+      setPostingMessage(
+        error instanceof Error ? `Could not unarchive posting: ${error.message}` : 'Could not unarchive posting.'
+      );
+    } finally {
+      setArchiveBusyPostingId(null);
+    }
+  };
+
+  const onChangeArchiveLabel = async (posting: PostingTableRow, label: 'good' | 'bad') => {
+    setArchiveBusyPostingId(posting._id);
+    setPostingMessage('');
+    try {
+      await updateArchiveLabel({ postingId: posting._id, label });
+      setPostingMessage(`Updated '${posting.title}' archive label to ${label}.`);
+    } catch (error) {
+      setPostingMessage(
+        error instanceof Error
+          ? `Could not update archive label: ${error.message}`
+          : 'Could not update archive label.'
+      );
+    } finally {
+      setArchiveBusyPostingId(null);
+    }
+  };
+
+  const onViewActiveForCompany = (company: string) => {
+    setPostingArchiveVisibility('active');
+    setPostingQuery(company);
+    resetPagination();
+    const next = new URLSearchParams(searchParams);
+    next.delete('archive');
+    next.delete('company');
+    setSearchParams(next, { replace: true });
+  };
+
+  const onBulkArchiveSelected = async (label: 'good' | 'bad') => {
+    if (!postings?.length || !selectedPostingIds.size) {
+      return;
+    }
+    const selected = postings.filter((posting) => selectedPostingIds.has(posting._id));
+    setPostingMessage('');
+    let archived = 0;
+    for (const posting of selected) {
+      try {
+        await archivePosting({ postingId: posting._id, label });
+        archived += 1;
+      } catch {
+        // Continue archiving remaining selections and summarize completion count.
+      }
+    }
+    setSelectedPostingIds(new Set());
+    setPostingMessage(`Archived ${archived}/${selected.length} selected posting(s) as ${label}.`);
+  };
+
   /**
    * Maintains multi-select state from the first-column row checkboxes.
    */
@@ -525,8 +658,8 @@ export function PostingViewer() {
           {totalPostings !== undefined ? (
             <p className='panel-subtitle tight'>
               {filteredCount !== undefined
-                ? `${filteredCount} matching · ${totalPostings} total in database`
-                : `${totalPostings} total in database`}
+                ? `${filteredCount} matching · ${totalPostings} active in database`
+                : `${totalPostings} active in database`}
             </p>
           ) : null}
         </div>
@@ -541,42 +674,70 @@ export function PostingViewer() {
       </div>
       {postingMessage ? <p className='status-text'>{postingMessage}</p> : null}
       <div className='postings-sticky-toolbar'>
-        <div className='filters'>
-          <input
-            value={postingQuery}
-            onChange={(event) => setPostingQuery(event.target.value)}
-            placeholder='Search title, company, location'
-          />
-          <select value={postingSource} onChange={(event) => setPostingSource(event.target.value)}>
-            <option value=''>All sources</option>
-            {configuredSources?.map((sourceRow) => (
-              <option value={sourceRow.source} key={sourceRow.source}>
-                {sourceRow.displayName}
-              </option>
-            ))}
-          </select>
-          <select
-            value={postingRankStatus}
-            onChange={(event) => setPostingRankStatus(event.target.value as PostingRankStatus)}
-          >
-            <option value='all'>All statuses</option>
-            <option value='ranked'>Ranked only</option>
-            <option value='unranked'>Unranked only</option>
-          </select>
-          <input
-            value={postingMinScore}
-            onChange={(event) => setPostingMinScore(event.target.value)}
-            placeholder='Min score'
-            type='number'
-            min={0}
-            max={100}
-          />
-          <select value={postingSort} onChange={(event) => setPostingSort(event.target.value as PostingSort)}>
-            <option value='scoreDesc'>Score (high to low)</option>
-            <option value='rankedAtDesc'>Ranked (newest)</option>
-            <option value='discoveredAtDesc'>Discovered (newest)</option>
-            <option value='postedAtDesc'>Posted (newest)</option>
-          </select>
+        <div className='filters filters--postings'>
+          <div className='filters__row filters__row--primary'>
+            <select
+              className='filters__select'
+              value={postingSource}
+              onChange={(event) => setPostingSource(event.target.value)}
+            >
+              <option value=''>All sources</option>
+              {configuredSources?.map((sourceRow) => (
+                <option value={sourceRow.source} key={sourceRow.source}>
+                  {sourceRow.displayName}
+                </option>
+              ))}
+            </select>
+            <select
+              className='filters__select'
+              value={postingRankStatus}
+              onChange={(event) => setPostingRankStatus(event.target.value as PostingRankStatus)}
+            >
+              <option value='all'>All rank statuses</option>
+              <option value='ranked'>Ranked only</option>
+              <option value='unranked'>Unranked only</option>
+            </select>
+            <select
+              className='filters__select filters__select--archive'
+              value={postingArchiveVisibility}
+              onChange={(event) =>
+                setPostingArchiveVisibility(event.target.value as PostingArchiveVisibility)
+              }
+            >
+              <option value='active'>Active</option>
+              <option value='archived'>All archived</option>
+              <option value='good'>Archived — good</option>
+              <option value='bad'>Archived — bad</option>
+            </select>
+            <select
+              className='filters__select filters__select--sort'
+              value={postingSort}
+              onChange={(event) => setPostingSort(event.target.value as PostingSort)}
+            >
+              <option value='scoreDesc'>Score (high to low)</option>
+              <option value='rankedAtDesc'>Ranked (newest)</option>
+              <option value='discoveredAtDesc'>Discovered (newest)</option>
+              <option value='postedAtDesc'>Posted (newest)</option>
+              {viewingArchived ? <option value='archivedAtDesc'>Archived (newest)</option> : null}
+            </select>
+            <input
+              className='filters__min-score'
+              value={postingMinScore}
+              onChange={(event) => setPostingMinScore(event.target.value)}
+              placeholder='Min score'
+              type='number'
+              min={0}
+              max={100}
+            />
+          </div>
+          <div className='filters__row filters__row--search'>
+            <input
+              className='filters__search'
+              value={postingQuery}
+              onChange={(event) => setPostingQuery(event.target.value)}
+              placeholder='Search title, company, location'
+            />
+          </div>
         </div>
         <div className='posting-bulk-toolbar'>
           <label className='posting-list-select-all'>
@@ -590,19 +751,38 @@ export function PostingViewer() {
             <span>Select all visible</span>
           </label>
           <div className='actions posting-bulk-actions'>
-            <button
-              type='button'
-              className='btn-success'
-              onClick={onBulkScoreSelected}
-              disabled={!selectedCount || scoreBusy || isClearing}
-            >
-              Score selected ({selectedCount})
-            </button>
+            {!viewingArchived ? (
+              <>
+                <ArchiveLabelSplitButton
+                  label={
+                    selectedCount > 0 ? `Archive (${selectedCount})` : 'Archive'
+                  }
+                  disabled={
+                    !selectedCount || scoreBusy || isClearing || archiveBusyPostingId !== null
+                  }
+                  onSelect={(archiveLabel) => void onBulkArchiveSelected(archiveLabel)}
+                />
+                <button
+                  type='button'
+                  className='btn-success'
+                  onClick={onBulkScoreSelected}
+                  disabled={!selectedCount || scoreBusy || isClearing}
+                >
+                  Score selected ({selectedCount})
+                </button>
+              </>
+            ) : null}
             <button
               type='button'
               className='btn-danger'
               onClick={() => void onBulkDeleteSelected()}
-              disabled={!selectedCount || scoreBusy || isClearing || deletingPostingId !== null}
+              disabled={
+                !selectedCount ||
+                scoreBusy ||
+                isClearing ||
+                deletingPostingId !== null ||
+                archiveBusyPostingId !== null
+              }
             >
               Delete selected ({selectedCount})
             </button>
@@ -611,9 +791,16 @@ export function PostingViewer() {
       </div>
       <PostingTable
         postings={postings}
+        viewingArchived={viewingArchived}
         deletingPostingId={deletingPostingId}
+        archiveBusyPostingId={archiveBusyPostingId}
         onDeletePosting={onDeletePosting}
-        onOpenScoreDialog={openScoreDialog}
+        onArchivePosting={viewingArchived ? undefined : onArchivePosting}
+        onUnarchivePosting={viewingArchived ? onUnarchivePosting : undefined}
+        onChangeArchiveLabel={viewingArchived ? onChangeArchiveLabel : undefined}
+        onViewActiveForCompany={viewingArchived ? onViewActiveForCompany : undefined}
+        activeCompanyCounts={activeCompanyCounts}
+        onOpenScoreDialog={viewingArchived ? undefined : openScoreDialog}
         selectedPostingIds={selectedPostingIds}
         onTogglePostingSelection={onTogglePostingSelection}
         questionCounts={questionCounts}

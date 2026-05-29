@@ -27,6 +27,8 @@ export const postingListRowValidator = v.object({
   discoveredAt: v.number(),
   createdAt: v.number(),
   descriptionSnippet: v.string(),
+  archivedAt: v.optional(v.number()),
+  archiveLabel: v.optional(v.union(v.literal('good'), v.literal('bad'))),
   latestRanking: v.union(v.null(), postingListRankingPreviewValidator),
 });
 
@@ -41,6 +43,8 @@ export type PostingListRow = {
   discoveredAt: number;
   createdAt: number;
   descriptionSnippet: string;
+  archivedAt?: number;
+  archiveLabel?: 'good' | 'bad';
   latestRanking: {
     scoreOverall: number;
     rankedAt: number;
@@ -100,6 +104,8 @@ export function toPostingListRow(
     discoveredAt: posting.discoveredAt,
     createdAt: posting.createdAt,
     descriptionSnippet: truncateDescriptionForList(posting.descriptionSnippet),
+    archivedAt: posting.archivedAt,
+    archiveLabel: posting.archiveLabel,
     latestRanking: latestRanking
       ? {
           scoreOverall: latestRanking.scoreOverall,

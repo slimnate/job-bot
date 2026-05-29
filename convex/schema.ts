@@ -96,6 +96,12 @@ export default defineSchema({
     /** Denormalized from latest `job_rankings` row for list sort/filter without N+1 scans. */
     latestScoreOverall: v.optional(v.number()),
     latestRankedAt: v.optional(v.number()),
+    /** When set, posting is hidden from the default active list. */
+    archivedAt: v.optional(v.number()),
+    /** User fit label when archived; required whenever `archivedAt` is set. */
+    archiveLabel: v.optional(v.union(v.literal('good'), v.literal('bad'))),
+    /** Optional notes captured when archiving (not shown in list v1). */
+    archiveNotes: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -105,7 +111,10 @@ export default defineSchema({
     .index('by_latest_score', ['latestScoreOverall'])
     .index('by_latest_ranked_at', ['latestRankedAt'])
     .index('by_source_discovered_at', ['source', 'discoveredAt'])
-    .index('by_posted_at', ['postedAt']),
+    .index('by_posted_at', ['postedAt'])
+    .index('by_archived_at', ['archivedAt'])
+    .index('by_archive_label_archived_at', ['archiveLabel', 'archivedAt'])
+    .index('by_company_archived_at', ['company', 'archivedAt']),
 
   job_rankings: defineTable({
     postingId: v.id('job_postings'),

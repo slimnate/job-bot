@@ -16,28 +16,72 @@ const listSortValidator = v.union(
   v.literal('discoveredAtDesc'),
   v.literal('rankedAtDesc'),
   v.literal('postedAtDesc'),
-  v.literal('scoreDesc')
+  v.literal('scoreDesc'),
+  v.literal('archivedAtDesc')
 );
 
-type ListSort = 'discoveredAtDesc' | 'rankedAtDesc' | 'postedAtDesc' | 'scoreDesc';
+const archiveVisibilityValidator = v.union(
+  v.literal('active'),
+  v.literal('archived'),
+  v.literal('good'),
+  v.literal('bad')
+);
+
+type ListSort =
+  | 'discoveredAtDesc'
+  | 'rankedAtDesc'
+  | 'postedAtDesc'
+  | 'scoreDesc'
+  | 'archivedAtDesc';
+
+type ArchiveVisibility = 'active' | 'archived' | 'good' | 'bad';
 
 type ListFilterArgs = {
   query?: string;
   source?: string;
+  company?: string;
   minScore?: number;
   sort?: ListSort;
   rankStatus?: 'ranked' | 'unranked';
+  archiveVisibility?: ArchiveVisibility;
 };
 
 type ListPageArgs = ListFilterArgs & {
   paginationOpts: { numItems: number; cursor: string | null };
 };
 
+function normalizeArchiveVisibility(value: ArchiveVisibility | undefined): ArchiveVisibility {
+  return value ?? 'active';
+}
+
 function postingMatchesTextQuery(posting: Doc<'job_postings'>, normalizedQuery: string): boolean {
   return [posting.title, posting.company, posting.location ?? '', posting.descriptionSnippet ?? '']
     .join(' ')
     .toLowerCase()
     .includes(normalizedQuery);
+}
+
+function postingMatchesCompanyFilter(posting: Doc<'job_postings'>, company: string | undefined): boolean {
+  if (!company) {
+    return true;
+  }
+  return posting.company.trim() === company;
+}
+
+function postingMatchesArchiveVisibility(
+  posting: Doc<'job_postings'>,
+  visibility: ArchiveVisibility
+): boolean {
+  if (visibility === 'active') {
+    return posting.archivedAt === undefined;
+  }
+  if (visibility === 'archived') {
+    return posting.archivedAt !== undefined;
+  }
+  if (visibility === 'good') {
+    return posting.archiveLabel === 'good';
+  }
+  return posting.archiveLabel === 'bad';
 }
 
 function postingMatchesRankFilters(
@@ -58,11 +102,25 @@ function postingMatchesRankFilters(
   return true;
 }
 
+function postingMatchesListFilters(posting: Doc<'job_postings'>, args: ListFilterArgs): boolean {
+  const visibility = normalizeArchiveVisibility(args.archiveVisibility);
+  if (!postingMatchesArchiveVisibility(posting, visibility)) {
+    return false;
+  }
+  if (!postingMatchesCompanyFilter(posting, args.company)) {
+    return false;
+  }
+  return postingMatchesRankFilters(posting, args);
+}
+
 function comparePostingsForSort(
   a: Doc<'job_postings'>,
   b: Doc<'job_postings'>,
   sortBy: ListSort
 ): number {
+  if (sortBy === 'archivedAtDesc') {
+    return (b.archivedAt ?? -1) - (a.archivedAt ?? -1);
+  }
   if (sortBy === 'scoreDesc') {
     return (b.latestScoreOverall ?? -1) - (a.latestScoreOverall ?? -1);
   }
@@ -106,6 +164,32 @@ function applySourceFilter<T extends { filter: (fn: (q: FilterApi) => FilterApi)
   return baseQuery.filter((q) => q.eq(q.field('source'), source));
 }
 
+function applyCompanyFilter<T extends { filter: (fn: (q: FilterApi) => FilterApi) => T }>(
+  baseQuery: T,
+  company: string | undefined
+): T {
+  if (!company) {
+    return baseQuery;
+  }
+  return baseQuery.filter((q) => q.eq(q.field('company'), company));
+}
+
+function applyArchiveVisibilityFilter<T extends { filter: (fn: (q: FilterApi) => FilterApi) => T }>(
+  baseQuery: T,
+  visibility: ArchiveVisibility
+): T {
+  if (visibility === 'active') {
+    return baseQuery.filter((q) => q.eq(q.field('archivedAt'), undefined));
+  }
+  if (visibility === 'archived') {
+    return baseQuery.filter((q) => q.neq(q.field('archivedAt'), undefined));
+  }
+  if (visibility === 'good') {
+    return baseQuery.filter((q) => q.eq(q.field('archiveLabel'), 'good'));
+  }
+  return baseQuery.filter((q) => q.eq(q.field('archiveLabel'), 'bad'));
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FilterApi = any;
 
@@ -136,32 +220,84 @@ async function collectTextSearchMatches(ctx: QueryCtx, args: ListFilterArgs & { 
   const sortBy = args.sort ?? 'discoveredAtDesc';
   return sourceFiltered
     .filter((posting) => postingMatchesTextQuery(posting, normalizedQuery))
-    .filter((posting) => postingMatchesRankFilters(posting, args))
+    .filter((posting) => postingMatchesListFilters(posting, args))
     .sort((a, b) => comparePostingsForSort(a, b, sortBy));
 }
 
 function buildIndexedFilteredQuery(ctx: QueryCtx, args: ListFilterArgs) {
   const sortBy = args.sort ?? 'discoveredAtDesc';
+  const visibility = normalizeArchiveVisibility(args.archiveVisibility);
+  const company = args.company;
+  const source = args.source;
 
   let baseQuery;
-  if (sortBy === 'scoreDesc') {
+  let companyInIndex = false;
+  let sourceInIndex = false;
+
+  if (sortBy === 'archivedAtDesc') {
+    if (visibility === 'good') {
+      baseQuery = ctx.db
+        .query('job_postings')
+        .withIndex('by_archive_label_archived_at', (q) => q.eq('archiveLabel', 'good'))
+        .order('desc');
+    } else if (visibility === 'bad') {
+      baseQuery = ctx.db
+        .query('job_postings')
+        .withIndex('by_archive_label_archived_at', (q) => q.eq('archiveLabel', 'bad'))
+        .order('desc');
+    } else if (company) {
+      baseQuery = ctx.db
+        .query('job_postings')
+        .withIndex('by_company_archived_at', (q) => q.eq('company', company))
+        .order('desc');
+      companyInIndex = true;
+      baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
+    } else {
+      baseQuery = ctx.db.query('job_postings').withIndex('by_archived_at').order('desc');
+      baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
+    }
+  } else if (company) {
+    if (visibility === 'active') {
+      baseQuery = ctx.db
+        .query('job_postings')
+        .withIndex('by_company', (q) => q.eq('company', company));
+      companyInIndex = true;
+      baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
+    } else {
+      baseQuery = ctx.db
+        .query('job_postings')
+        .withIndex('by_company_archived_at', (q) => q.eq('company', company))
+        .order('desc');
+      companyInIndex = true;
+      baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
+    }
+  } else if (sortBy === 'scoreDesc') {
     baseQuery = ctx.db.query('job_postings').withIndex('by_latest_score').order('desc');
+    baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
   } else if (sortBy === 'rankedAtDesc') {
     baseQuery = ctx.db.query('job_postings').withIndex('by_latest_ranked_at').order('desc');
+    baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
   } else if (sortBy === 'postedAtDesc') {
     baseQuery = ctx.db.query('job_postings').withIndex('by_posted_at').order('desc');
-  } else if (args.source) {
+    baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
+  } else if (source) {
     baseQuery = ctx.db
       .query('job_postings')
-      .withIndex('by_source_discovered_at', (q) => q.eq('source', args.source!))
+      .withIndex('by_source_discovered_at', (q) => q.eq('source', source))
       .order('desc');
+    sourceInIndex = true;
+    baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
   } else {
     baseQuery = ctx.db.query('job_postings').withIndex('by_discovered_at').order('desc');
+    baseQuery = applyArchiveVisibilityFilter(baseQuery, visibility);
   }
 
   let filtered = applyDenormFilters(baseQuery, args);
-  if (args.source && sortBy !== 'discoveredAtDesc') {
-    filtered = applySourceFilter(filtered, args.source);
+  if (source && !sourceInIndex) {
+    filtered = applySourceFilter(filtered, source);
+  }
+  if (company && !companyInIndex) {
+    filtered = applyCompanyFilter(filtered, company);
   }
   return filtered;
 }
@@ -206,48 +342,61 @@ async function listPageIndexed(ctx: QueryCtx, args: ListPageArgs) {
   };
 }
 
+const listFilterArgsValidator = {
+  pageSize: v.optional(v.number()),
+  query: v.optional(v.string()),
+  source: v.optional(v.string()),
+  company: v.optional(v.string()),
+  minScore: v.optional(v.number()),
+  sort: v.optional(listSortValidator),
+  rankStatus: v.optional(v.union(v.literal('ranked'), v.literal('unranked'))),
+  archiveVisibility: v.optional(archiveVisibilityValidator),
+};
+
+function normalizeListFilterArgs(args: {
+  query?: string;
+  source?: string;
+  company?: string;
+  minScore?: number;
+  sort?: ListSort;
+  rankStatus?: 'ranked' | 'unranked';
+  archiveVisibility?: ArchiveVisibility;
+}): ListFilterArgs {
+  return {
+    query: args.query?.trim() || undefined,
+    source: args.source?.trim() || undefined,
+    company: args.company?.trim() || undefined,
+    minScore: args.minScore,
+    sort: args.sort,
+    rankStatus: args.rankStatus,
+    archiveVisibility: args.archiveVisibility,
+  };
+}
+
 /**
  * Paginated postings list with preview fields only (see README field contract).
  */
 export const listPage = query({
   args: {
     paginationOpts: paginationOptsValidator,
-    pageSize: v.optional(v.number()),
-    query: v.optional(v.string()),
-    source: v.optional(v.string()),
-    minScore: v.optional(v.number()),
-    sort: v.optional(listSortValidator),
-    rankStatus: v.optional(v.union(v.literal('ranked'), v.literal('unranked'))),
+    ...listFilterArgsValidator,
   },
   handler: async (ctx, args) => {
-    const normalizedQuery = args.query?.trim().toLowerCase();
+    const filterArgs = normalizeListFilterArgs(args);
     const listArgs: ListPageArgs = {
       paginationOpts: {
         numItems: capListPageNumItems(args.paginationOpts.numItems),
         cursor: args.paginationOpts.cursor,
       },
-      query: normalizedQuery || undefined,
-      source: args.source?.trim() || undefined,
-      minScore: args.minScore,
-      sort: args.sort,
-      rankStatus: args.rankStatus,
+      ...filterArgs,
     };
 
-    if (normalizedQuery) {
-      return await listPageWithTextSearch(ctx, listArgs);
+    if (filterArgs.query) {
+      return await listPageWithTextSearch(ctx, { ...listArgs, query: filterArgs.query });
     }
     return await listPageIndexed(ctx, listArgs);
   },
 });
-
-const listFilterArgsValidator = {
-  pageSize: v.optional(v.number()),
-  query: v.optional(v.string()),
-  source: v.optional(v.string()),
-  minScore: v.optional(v.number()),
-  sort: v.optional(listSortValidator),
-  rankStatus: v.optional(v.union(v.literal('ranked'), v.literal('unranked'))),
-};
 
 /**
  * Count of postings matching the same filters as `listPage` (for page X of Y).
@@ -255,17 +404,10 @@ const listFilterArgsValidator = {
 export const listPageCount = query({
   args: listFilterArgsValidator,
   handler: async (ctx, args) => {
-    const normalizedQuery = args.query?.trim().toLowerCase();
-    const filterArgs: ListFilterArgs = {
-      query: normalizedQuery || undefined,
-      source: args.source?.trim() || undefined,
-      minScore: args.minScore,
-      sort: args.sort,
-      rankStatus: args.rankStatus,
-    };
+    const filterArgs = normalizeListFilterArgs(args);
 
-    if (normalizedQuery) {
-      const matched = await collectTextSearchMatches(ctx, { ...filterArgs, query: normalizedQuery });
+    if (filterArgs.query) {
+      const matched = await collectTextSearchMatches(ctx, { ...filterArgs, query: filterArgs.query });
       return matched.length;
     }
 

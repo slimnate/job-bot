@@ -1,8 +1,9 @@
 Make chrome worker use a profile or something similar so that the worker does not have to log in to linkedin every time. We are sometimes hitting a captcha check that will block the worker without manual intervention.
 
-Examine tests created, document test suite, make sure tests (specifically linkedin related) aren't doing lots of unnecessary work.
+[x] Archive postings with good/bad labels; filter archived on /postings (active / archived / good / bad).
+Use archived good postings to revisit employers — filter by company on active list.
 
-Add ability to archive postings, and a page to view archived postings. I may want to periodically examine archived postings that were a good fit to see if there are more new postings from the same employer that I can check on. Maybe add options to archive with a status of "good" or "bad" so that I can filter archived postings as well, and potentially use the archived postings to inform future rankings.
+Use archived good/bad postings to inform future rankings (inject examples into buildRankingPrompt; app settings toggle).
 
 Application status tracking. "Starred" feature to mark postings that are important. Add status field to postings such as: want to apply, applied, wont apply, rejected, etc.
 
@@ -14,4 +15,4 @@ Wizard to create a scoring rubric for any generic type of job the user could wan
 
 Review system prompts and make modifications as necessary
 
-
+Examine tests created, document test suite, make sure tests (specifically linkedin related) aren't doing lots of unnecessary work.

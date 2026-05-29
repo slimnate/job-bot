@@ -8,6 +8,7 @@ import { formatHumanizedTime } from '../lib/time';
 import { MarkdownContent } from './MarkdownContent.js';
 import { PostingAskPanel } from './PostingAskPanel.js';
 import { PostingCoverLetterPanel } from './PostingCoverLetterPanel.js';
+import { ArchiveLabelSplitButton } from './ArchiveLabelSplitButton.js';
 import {
   DimensionScoresCompactTable,
   type DimensionScoresRecord,
@@ -459,8 +460,15 @@ function ViewPostingModal({ postingId, title, onClose }: ViewPostingModalProps) 
 type PostingTableProps = {
   postings: PostingTableRow[] | undefined;
   emptyMessage?: string;
+  viewingArchived?: boolean;
   deletingPostingId?: string | null;
+  archiveBusyPostingId?: string | null;
   onDeletePosting?: (posting: PostingTableRow) => Promise<void>;
+  onArchivePosting?: (posting: PostingTableRow, label: 'good' | 'bad') => Promise<void>;
+  onUnarchivePosting?: (posting: PostingTableRow) => Promise<void>;
+  onChangeArchiveLabel?: (posting: PostingTableRow, label: 'good' | 'bad') => Promise<void>;
+  onViewActiveForCompany?: (company: string) => void;
+  activeCompanyCounts?: Record<string, number>;
   onOpenScoreDialog?: (posting: PostingTableRow) => void;
   selectedPostingIds?: Set<string>;
   onTogglePostingSelection?: (postingId: string, checked: boolean) => void;
@@ -472,11 +480,28 @@ type PostingTableProps = {
   workerTriggerBaseUrl?: string | null;
 };
 
+function archiveLabelBadgeClass(label: 'good' | 'bad' | undefined): string {
+  if (label === 'good') {
+    return 'posting-archive-badge posting-archive-badge--good';
+  }
+  if (label === 'bad') {
+    return 'posting-archive-badge posting-archive-badge--bad';
+  }
+  return 'posting-archive-badge';
+}
+
 export function PostingTable({
   postings,
   emptyMessage = 'No postings match these filters.',
+  viewingArchived = false,
   deletingPostingId,
+  archiveBusyPostingId,
   onDeletePosting,
+  onArchivePosting,
+  onUnarchivePosting,
+  onChangeArchiveLabel,
+  onViewActiveForCompany,
+  activeCompanyCounts,
   onOpenScoreDialog,
   selectedPostingIds,
   onTogglePostingSelection,
@@ -484,7 +509,13 @@ export function PostingTable({
   coverLetterCounts,
   workerTriggerBaseUrl = null,
 }: PostingTableProps) {
-  const showActions = Boolean(onDeletePosting || onOpenScoreDialog);
+  const showActions = Boolean(
+    onDeletePosting ||
+      onOpenScoreDialog ||
+      onArchivePosting ||
+      onUnarchivePosting ||
+      onChangeArchiveLabel
+  );
   const showSelection = Boolean(onTogglePostingSelection);
   const showAsk = Boolean(onDeletePosting || onOpenScoreDialog);
   const showCoverLetter = Boolean(onDeletePosting || onOpenScoreDialog);
@@ -541,6 +572,36 @@ export function PostingTable({
     }
   };
 
+  const onArchive = async (posting: PostingTableRow, label: 'good' | 'bad') => {
+    if (!onArchivePosting) {
+      return;
+    }
+    await onArchivePosting(posting, label);
+    if (selectedPostingId === posting._id) {
+      closeModal();
+    }
+  };
+
+  const onUnarchive = async (posting: PostingTableRow) => {
+    if (!onUnarchivePosting) {
+      return;
+    }
+    await onUnarchivePosting(posting);
+    if (selectedPostingId === posting._id) {
+      closeModal();
+    }
+  };
+
+  const onToggleArchiveLabel = async (posting: PostingTableRow, label: 'good' | 'bad') => {
+    if (!onChangeArchiveLabel || posting.archiveLabel === label) {
+      return;
+    }
+    await onChangeArchiveLabel(posting, label);
+  };
+
+  const rowBusy = (postingId: string) =>
+    deletingPostingId === postingId || archiveBusyPostingId === postingId;
+
   const hasRows = Boolean(postings?.length);
 
   return (
@@ -573,6 +634,7 @@ export function PostingTable({
                 coverLetterCount !== undefined && coverLetterCount > 0
                   ? `${coverLetterToggleBase}, ${coverLetterCount} ${coverLetterCount === 1 ? 'version' : 'versions'}`
                   : coverLetterToggleBase;
+              const activeCountForCompany = activeCompanyCounts?.[posting.company];
               return (
                 <li key={posting._id}>
                   <article className='posting-item' aria-label={`Posting: ${posting.title}`}>
@@ -604,12 +666,40 @@ export function PostingTable({
                                 Score
                               </button>
                             ) : null}
+                            {onArchivePosting ? (
+                              <ArchiveLabelSplitButton
+                                disabled={rowBusy(posting._id)}
+                                busy={archiveBusyPostingId === posting._id}
+                                onSelect={(archiveLabel) => void onArchive(posting, archiveLabel)}
+                              />
+                            ) : null}
+                            {onUnarchivePosting ? (
+                              <button
+                                type='button'
+                                onClick={() => void onUnarchive(posting)}
+                                disabled={rowBusy(posting._id)}
+                              >
+                                {archiveBusyPostingId === posting._id ? 'Working…' : 'Unarchive'}
+                              </button>
+                            ) : null}
+                            {onChangeArchiveLabel ? (
+                              <ArchiveLabelSplitButton
+                                label='Label'
+                                disabled={rowBusy(posting._id)}
+                                busy={archiveBusyPostingId === posting._id}
+                                disableGoodOption={posting.archiveLabel === 'good'}
+                                disableBadOption={posting.archiveLabel === 'bad'}
+                                onSelect={(archiveLabel) =>
+                                  void onToggleArchiveLabel(posting, archiveLabel)
+                                }
+                              />
+                            ) : null}
                             {onDeletePosting ? (
                               <button
                                 type='button'
                                 className='btn-danger'
                                 onClick={() => void onDelete(posting)}
-                                disabled={deletingPostingId === posting._id}
+                                disabled={rowBusy(posting._id)}
                               >
                                 {deletingPostingId === posting._id ? 'Deleting…' : 'Delete'}
                               </button>
@@ -619,6 +709,13 @@ export function PostingTable({
                       </div>
                     ) : null}
                     <div className='posting-item__meta'>
+                      {viewingArchived && posting.archiveLabel ? (
+                        <span
+                          className={`posting-item__meta-field ${archiveLabelBadgeClass(posting.archiveLabel)}`}
+                        >
+                          {posting.archiveLabel === 'good' ? 'Good fit' : 'Bad fit'}
+                        </span>
+                      ) : null}
                       <span className={`posting-item__meta-field posting-item__meta-score ${scoreColorClass}`}>
                         {formatOverallScore(scoreOverall)}
                       </span>
@@ -651,6 +748,26 @@ export function PostingTable({
                         <span className='posting-item__meta-label'>Discovered</span>{' '}
                         {formatHumanizedTime(posting.discoveredAt)}
                       </span>
+                      {viewingArchived && posting.archivedAt ? (
+                        <span className='posting-item__meta-field posting-item__meta-time'>
+                          <span className='posting-item__meta-label'>Archived</span>{' '}
+                          {formatHumanizedTime(posting.archivedAt)}
+                        </span>
+                      ) : null}
+                      {viewingArchived &&
+                      onViewActiveForCompany &&
+                      activeCountForCompany !== undefined &&
+                      activeCountForCompany > 0 ? (
+                        <span className='posting-item__meta-field posting-item__meta-employer-active'>
+                          <button
+                            type='button'
+                            className='posting-employer-active-link'
+                            onClick={() => onViewActiveForCompany(posting.company)}
+                          >
+                            {activeCountForCompany} active from this employer
+                          </button>
+                        </span>
+                      ) : null}
                     </div>
                     <PostingDescription
                       postingId={posting._id}
