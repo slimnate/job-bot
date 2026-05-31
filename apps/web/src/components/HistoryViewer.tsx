@@ -5,10 +5,19 @@ import { api } from '../../../../convex/_generated/api.js';
 import type { Doc, Id } from '../../../../convex/_generated/dataModel.js';
 import { formatHumanizedTime } from '../lib/time';
 import { formatRunLabel } from '../lib/formatSourceCriteria';
+import { formatRunStatusLabel, isRunInProgress, runStatusBadgeClass } from '../lib/formatRunStatus';
 import { WorkerQueuePanel } from './WorkerQueuePanel';
 import { WorkerSchedulerPanel } from './WorkerSchedulerPanel';
 
-type RunStatus = '' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+type RunStatus =
+  | ''
+  | 'queued'
+  | 'running'
+  | 'scraping'
+  | 'ranking'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
 type SearchPathFilter = '' | 'ui' | 'url_fallback' | 'search_url' | 'preferences_hub';
 
 const formatRunDuration = (startedAt: number, endedAt?: number): string => {
@@ -242,14 +251,14 @@ export function HistoryViewer() {
   }, [runs, runSearchPathFilter]);
 
   const onStopRun = async (run: Doc<'scrape_runs'>) => {
-    if (run.status !== 'queued' && run.status !== 'running') {
+    if (!isRunInProgress(run.status)) {
       return;
     }
 
     const confirmed = window.confirm(
       run.status === 'queued'
         ? 'Cancel this queued run immediately?'
-        : 'Request graceful stop? The run will finish upsert and ranking first.'
+        : 'Request graceful stop? The run will finish the current scrape or ranking phase first.'
     );
     if (!confirmed) {
       return;
@@ -380,7 +389,9 @@ export function HistoryViewer() {
           <select value={runStatusFilter} onChange={(event) => setRunStatusFilter(event.target.value as RunStatus)}>
             <option value=''>All statuses</option>
             <option value='queued'>Queued</option>
-            <option value='running'>Running</option>
+            <option value='running'>Running (legacy)</option>
+            <option value='scraping'>Scraping</option>
+            <option value='ranking'>Ranking</option>
             <option value='succeeded'>Succeeded</option>
             <option value='failed'>Failed</option>
             <option value='cancelled'>Cancelled</option>
@@ -415,7 +426,9 @@ export function HistoryViewer() {
                 visibleRuns.map((run) => (
                   <tr key={run._id}>
                     <td>
-                      <span className={`status-badge status-${run.status}`}>{run.status}</span>
+                      <span className={`status-badge status-${runStatusBadgeClass(run)}`}>
+                        {formatRunStatusLabel(run)}
+                      </span>
                     </td>
                     <td>
                       {run.source}
@@ -467,7 +480,7 @@ export function HistoryViewer() {
                         onClick={() => void onStopRun(run)}
                         disabled={
                           actionBusyRunId !== null ||
-                          (run.status !== 'queued' && run.status !== 'running')
+                          !isRunInProgress(run.status)
                         }
                       >
                         Stop

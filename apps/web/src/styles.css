@@ -2569,10 +2569,17 @@ thead th {
   background: rgba(37, 99, 235, 0.18);
 }
 
-.status-running {
+.status-running,
+.status-scraping {
   color: #fde68a;
   border-color: #ca8a04;
   background: rgba(202, 138, 4, 0.15);
+}
+
+.status-ranking {
+  color: #c4b5fd;
+  border-color: #7c3aed;
+  background: rgba(124, 58, 237, 0.18);
 }
 
 .status-succeeded {

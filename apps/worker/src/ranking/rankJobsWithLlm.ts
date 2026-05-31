@@ -83,6 +83,8 @@ type LlmRequestPayload = {
   model: string;
   /** When set, overrides `LLM_RANKING_PROVIDER` for this call only. */
   provider?: 'http' | 'cursor';
+  /** Called when a ranking batch starts (1-based index). */
+  onBatchProgress?: (current: number, total: number) => void | Promise<void>;
 };
 
 type LlmClientConfig = {
@@ -376,14 +378,16 @@ async function scoreCursorWithChunks(params: {
   candidates: RankingCandidateInput[];
   cursorConfig: CursorCliConfig;
   promptOptions: ReturnType<typeof loadRankingPromptOptions>;
+  onBatchProgress?: (current: number, total: number) => void | Promise<void>;
 }): Promise<RankingResult[] | null> {
-  const { evaluator, candidates, cursorConfig } = params;
+  const { evaluator, candidates, cursorConfig, onBatchProgress } = params;
   const chunkSize = loadCursorChunkSize();
   const chunks = chunkCandidates(candidates, chunkSize);
   const merged: RankingResult[] = [];
 
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i]!;
+    await onBatchProgress?.(i + 1, chunks.length);
     workerLog.info('llm.rank.chunk.begin', {
       chunkIndex: i + 1,
       chunkTotal: chunks.length,
@@ -430,8 +434,10 @@ async function scoreWithRetries(params: {
   httpConfig: LlmClientConfig | null;
   cursorConfig: CursorCliConfig | null;
   promptOptions: ReturnType<typeof loadRankingPromptOptions>;
+  onBatchProgress?: (current: number, total: number) => void | Promise<void>;
 }): Promise<RankingResult[] | null> {
-  const { provider, evaluator, candidates, httpConfig, cursorConfig, promptOptions } = params;
+  const { provider, evaluator, candidates, httpConfig, cursorConfig, promptOptions, onBatchProgress } =
+    params;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     if (isRankDebug()) {
@@ -449,6 +455,7 @@ async function scoreWithRetries(params: {
     } else if (provider === 'http' && httpConfig) {
       const flat: RankingResult[] = [];
       for (let i = 0; i < candidates.length; i += 1) {
+        await onBatchProgress?.(i + 1, candidates.length);
         const candidate = candidates[i]!;
         const one = await callLlmForOnePosting(evaluator, candidate, httpConfig, promptOptions);
         if (!one) {
@@ -547,6 +554,7 @@ export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
           candidates,
           cursorConfig,
           promptOptions,
+          onBatchProgress: payload.onBatchProgress,
         })
       : await scoreWithRetries({
           provider,
@@ -555,6 +563,7 @@ export async function rankJobsWithLlm(payload: LlmRequestPayload): Promise<{
           httpConfig,
           cursorConfig,
           promptOptions,
+          onBatchProgress: payload.onBatchProgress,
         });
 
   if (!rankings) {

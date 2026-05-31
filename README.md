@@ -21,7 +21,7 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - a single **Add run** form (`apps/web/src/components/WorkerRunDialog.tsx`, rendered inline above the list) with a One-time / Recurring toggle. One-time runs are **ephemeral**: they enqueue a `scrape_runs` row immediately (and best-effort wake the worker) without persisting a `worker_schedules` row, so they appear only as queued runs / history. Recurring runs persist a `worker_schedules` row that the Convex cron `tick` fires on cadence.
   - there is no user-defined schedule name; a display label is **derived** from source + criteria + cadence (`formatRunLabel` in `apps/web/src/lib/formatSourceCriteria.ts`)
   - the merged table lists recurring schedules and pending one-time runs together; per-row actions are Run now / Edit / Enable-Disable / Delete (recurring) and Trigger now / Edit / Remove (one-time)
-  - status color coding (`queued` blue, `running` yellow, `succeeded` green, `failed`/`cancelled` red)
+  - status color coding (`queued` blue, `scraping` yellow, `ranking` purple with batch progress e.g. `ranking 2/5`, `succeeded` green, `failed`/`cancelled` red; legacy `running` rows display like scraping)
   - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
   - log detail modal with table-first view, **per-level filters** (debug / info / warn / error), and raw JSON
 - Settings (`/settings`, sidebar layout in `apps/web/src/pages/SettingsLayout.tsx`): **Overview** plus section routes (`/settings/scheduler`, `/settings/linkedin`, `/settings/remotive`, `/settings/ranking`, `/settings/http-openai`, `/settings/cursor-cli`, `/settings/web`, `/settings/advanced`). Worker, LinkedIn, Remotive, ranking, HTTP/OpenAI (non-secret), Cursor CLI, and web↔worker options stored in Convex `app_settings`; each field has always-visible hint text (catalog in `packages/shared/src/settings/appSettingDefinitions.ts`). Non-empty env vars override saved values; the worker refreshes settings about every 30 seconds. Draft edits persist across section navigation until you save.
@@ -408,7 +408,7 @@ Per workspace:
 - Workers history shows LinkedIn search path (`UI search`, `Preferences hub`, or legacy `Search URL` / `URL fallback` on older runs).
 - History `Stop` behavior:
   - queued runs: immediately marked `cancelled`
-  - running runs: graceful stop request is recorded; worker finishes in-flight upsert + ranking before terminal status
+  - in-progress runs (`scraping`, `ranking`, or legacy `running`): graceful stop request is recorded; worker finishes the current scrape or ranking phase before terminal status
 - `Clear All` actions in Postings and Workers run in bounded Convex batches and may schedule follow-up cleanup for large datasets.
 - Workers log modal intentionally keeps original log timestamps (no humanized conversion) and color-codes levels (`debug` slate, `info` blue, `warn` yellow, `error` red). **Level** checkboxes filter which rows are shown (unparseable lines always stay visible). Fixed columns are timestamp, level, source, service, phase, and message; any remaining JSON fields render in an **Other** column as `key: value` lines.
 

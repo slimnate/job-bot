@@ -53,11 +53,18 @@ export default defineSchema({
     linkedinFallbackReason: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),
+      /** Legacy in-flight status; new runs use `scraping` / `ranking`. */
       v.literal('running'),
+      v.literal('scraping'),
+      v.literal('ranking'),
       v.literal('succeeded'),
       v.literal('failed'),
       v.literal('cancelled')
     ),
+    /** Set while `status` is `ranking` (Cursor batch index, 1-based). */
+    rankingBatchIndex: v.optional(v.number()),
+    /** Total Cursor ranking batches for the current ranking phase. */
+    rankingBatchTotal: v.optional(v.number()),
     startedAt: v.number(),
     endedAt: v.optional(v.number()),
     logsSummary: v.optional(v.string()),

@@ -14,6 +14,24 @@ const statsValidator = v.object({
   errorCount: v.number(),
 });
 
+const runStatusValidator = v.union(
+  v.literal('queued'),
+  v.literal('running'),
+  v.literal('scraping'),
+  v.literal('ranking'),
+  v.literal('succeeded'),
+  v.literal('failed'),
+  v.literal('cancelled')
+);
+
+/** Statuses that mean a run has not reached a terminal state yet. */
+const nonTerminalRunStatuses = new Set([
+  'queued',
+  'running',
+  'scraping',
+  'ranking',
+]);
+
 type TriggeredBy = 'manual' | 'schedule';
 
 /**
@@ -85,15 +103,7 @@ async function insertQueuedRun(
 export const list = query({
   args: {
     source: v.optional(sourceKeyValidator),
-    status: v.optional(
-      v.union(
-        v.literal('queued'),
-        v.literal('running'),
-        v.literal('succeeded'),
-        v.literal('failed'),
-        v.literal('cancelled')
-      )
-    ),
+    status: v.optional(runStatusValidator),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -334,17 +344,13 @@ export const bumpQueued = mutation({
 export const updateStatus = mutation({
   args: {
     runId: v.id('scrape_runs'),
-    status: v.union(
-      v.literal('queued'),
-      v.literal('running'),
-      v.literal('succeeded'),
-      v.literal('failed'),
-      v.literal('cancelled')
-    ),
+    status: runStatusValidator,
     logsSummary: v.optional(v.string()),
     stats: v.optional(statsValidator),
     errorMessage: v.optional(v.string()),
     endedAt: v.optional(v.number()),
+    rankingBatchIndex: v.optional(v.number()),
+    rankingBatchTotal: v.optional(v.number()),
     linkedinSearchStrategy: v.optional(
       v.union(
         v.literal('ui'),
@@ -357,17 +363,48 @@ export const updateStatus = mutation({
     linkedinFallbackReason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.runId, {
+    const patch: {
+      status: typeof args.status;
+      logsSummary?: string;
+      stats?: typeof args.stats;
+      errorMessage?: string;
+      endedAt?: number;
+      rankingBatchIndex?: number;
+      rankingBatchTotal?: number;
+      linkedinSearchStrategy?: typeof args.linkedinSearchStrategy;
+      usedLinkedinUrlFallback?: boolean;
+      linkedinFallbackReason?: string;
+      updatedAt: number;
+    } = {
       status: args.status,
       logsSummary: args.logsSummary,
       stats: args.stats,
       errorMessage: args.errorMessage,
-      endedAt: args.endedAt ?? (args.status === 'running' || args.status === 'queued' ? undefined : Date.now()),
       linkedinSearchStrategy: args.linkedinSearchStrategy,
       usedLinkedinUrlFallback: args.usedLinkedinUrlFallback,
       linkedinFallbackReason: args.linkedinFallbackReason,
       updatedAt: Date.now(),
-    });
+    };
+
+    if (nonTerminalRunStatuses.has(args.status)) {
+      patch.endedAt = args.endedAt;
+    } else {
+      patch.endedAt = args.endedAt ?? Date.now();
+    }
+
+    if (args.status === 'ranking') {
+      if (args.rankingBatchIndex !== undefined) {
+        patch.rankingBatchIndex = args.rankingBatchIndex;
+      }
+      if (args.rankingBatchTotal !== undefined) {
+        patch.rankingBatchTotal = args.rankingBatchTotal;
+      }
+    } else {
+      patch.rankingBatchIndex = undefined;
+      patch.rankingBatchTotal = undefined;
+    }
+
+    await ctx.db.patch(args.runId, patch);
   },
 });
 
@@ -383,8 +420,8 @@ export const requestGracefulStop = mutation({
     if (!run) {
       throw new Error('Run not found');
     }
-    if (run.status !== 'running') {
-      throw new Error('Only running runs can be stopped gracefully');
+    if (run.status !== 'running' && run.status !== 'scraping' && run.status !== 'ranking') {
+      throw new Error('Only in-progress runs can be stopped gracefully');
     }
 
     const now = Date.now();

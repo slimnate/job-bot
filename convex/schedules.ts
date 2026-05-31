@@ -335,22 +335,24 @@ export const tick = internalMutation({
 
     for (const schedule of due) {
       try {
-        const queued = await ctx.db
-          .query('scrape_runs')
-          .withIndex('by_schedule_and_status', (q) =>
-            q.eq('scheduleId', schedule._id).eq('status', 'queued')
-          )
-          .take(1);
-        const running = await ctx.db
-          .query('scrape_runs')
-          .withIndex('by_schedule_and_status', (q) =>
-            q.eq('scheduleId', schedule._id).eq('status', 'running')
-          )
-          .take(1);
-        if (queued.length > 0 || running.length > 0) {
+        const inFlightStatuses = ['queued', 'running', 'scraping', 'ranking'] as const;
+        let hasInFlight = false;
+        for (const status of inFlightStatuses) {
+          const rows = await ctx.db
+            .query('scrape_runs')
+            .withIndex('by_schedule_and_status', (q) =>
+              q.eq('scheduleId', schedule._id).eq('status', status)
+            )
+            .take(1);
+          if (rows.length > 0) {
+            hasInFlight = true;
+            break;
+          }
+        }
+        if (hasInFlight) {
           skippedInFlight += 1;
           await ctx.db.patch(schedule._id, {
-            lastError: 'Skipped: schedule already has queued or running work.',
+            lastError: 'Skipped: schedule already has queued or in-progress work.',
             nextRunAt: computeNextRunAt(schedule.schedule, now),
             updatedAt: now,
           });

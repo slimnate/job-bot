@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 
 import { api } from '../../../../convex/_generated/api.js';
 import type { Id } from '../../../../convex/_generated/dataModel.js';
+import { formatRunStatusLabel, runStatusBadgeClass } from '../lib/formatRunStatus';
 
 const formatDateTime = (timestamp?: number): string => {
   if (!timestamp) {
@@ -66,7 +67,10 @@ export function RunDetailPage() {
             );
           })()}
           <p>
-            <span className='run-detail-label'>Status</span> {run.status}
+            <span className='run-detail-label'>Status</span>{' '}
+            <span className={`status-badge status-${runStatusBadgeClass(run)}`}>
+              {formatRunStatusLabel(run)}
+            </span>
           </p>
           <p>
             <span className='run-detail-label'>Source</span> {run.source}

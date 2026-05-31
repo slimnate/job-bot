@@ -240,11 +240,11 @@ export class WorkerOrchestrator {
         source: payload.source,
       });
 
-      await this.runConvex(`runs.updateStatus:running:${payload.runId}`, () =>
+      await this.runConvex(`runs.updateStatus:scraping:${payload.runId}`, () =>
         this.convex.mutation(api.runs.updateStatus, {
           runId: payload.runId,
-          status: 'running',
-          logsSummary: `Started source '${payload.source}' run`,
+          status: 'scraping',
+          logsSummary: `Scraping source '${payload.source}'`,
         })
       );
 
@@ -383,10 +383,33 @@ export class WorkerOrchestrator {
             candidateCount: candidatesForRun.length,
           });
 
+          if (candidatesForRun.length > 0) {
+            await this.runConvex(`runs.updateStatus:ranking:${payload.runId}`, () =>
+              this.convex.mutation(api.runs.updateStatus, {
+                runId: payload.runId,
+                status: 'ranking',
+                logsSummary: `Ranking ${candidatesForRun.length} posting(s) for '${payload.source}'`,
+              })
+            );
+          }
+
           const rankingResult = await rankJobsWithLlm({
             evaluator: recompute.evaluator,
             model: recompute.model,
             candidates: candidatesForRun as unknown as LlmRankingCandidate[],
+            onBatchProgress:
+              candidatesForRun.length > 0
+                ? async (current, total) => {
+                    await this.runConvex(`runs.updateStatus:ranking:${payload.runId}:${current}`, () =>
+                      this.convex.mutation(api.runs.updateStatus, {
+                        runId: payload.runId,
+                        status: 'ranking',
+                        rankingBatchIndex: current,
+                        rankingBatchTotal: total,
+                      })
+                    );
+                  }
+                : undefined,
           });
           const rankings = rankingResult.rankings;
           rankedCount = rankings.length;
