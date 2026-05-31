@@ -17,4 +17,4 @@ Examine tests created, document test suite, make sure tests (specifically linked
 
 Add ability to run as a linux service. Create install script.
 
-Add "View Jobs" button to the history list that shows a list of all jobs scraped in that run.
+Add dynamic titles to each page.

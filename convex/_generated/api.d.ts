@@ -26,6 +26,7 @@ import type * as rankingValidators from "../rankingValidators.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runs from "../runs.js";
 import type * as schedules from "../schedules.js";
+import type * as scrapeRunPostingsHelpers from "../scrapeRunPostingsHelpers.js";
 import type * as sourceContract from "../sourceContract.js";
 import type * as sourcePresets from "../sourcePresets.js";
 import type * as sources from "../sources.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   runLogs: typeof runLogs;
   runs: typeof runs;
   schedules: typeof schedules;
+  scrapeRunPostingsHelpers: typeof scrapeRunPostingsHelpers;
   sourceContract: typeof sourceContract;
   sourcePresets: typeof sourcePresets;
   sources: typeof sources;

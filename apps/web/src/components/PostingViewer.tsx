@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAction, useMutation, useQuery } from 'convex/react';
 
@@ -35,7 +35,23 @@ function readStoredPageSize(): PageSizeOption {
   }
 }
 
-export function PostingViewer() {
+export type PostingViewerProps = {
+  /** When set, list is scoped to postings linked to this scrape run. */
+  scrapeRunId?: Id<'scrape_runs'>;
+  /** Replaces the default Postings heading row (e.g. run jobs page). */
+  headerContent?: ReactNode;
+  /** Shown on the main postings page; defaults to false when `scrapeRunId` is set. */
+  showClearAll?: boolean;
+  /** Navigate to active postings filtered by company (run page links out to `/postings`). */
+  onViewActiveForCompanyNavigate?: (company: string) => void;
+};
+
+export function PostingViewer({
+  scrapeRunId,
+  headerContent,
+  showClearAll = !scrapeRunId,
+  onViewActiveForCompanyNavigate,
+}: PostingViewerProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const workerTriggerUrl = useWorkerTriggerUrl();
   const workerTriggerBaseUrl = useMemo(() => {
@@ -57,7 +73,7 @@ export function PostingViewer() {
   const updateArchiveLabel = useMutation(api.postingArchive.updateArchiveLabel);
   const scoreOnePosting = useAction(api.rankingScorePosting.scoreOnePosting);
   const scorePostingsBatch = useAction(api.rankingScorePosting.scorePostingsBatch);
-  const [postingQuery, setPostingQuery] = useState('');
+  const [postingQuery, setPostingQuery] = useState(() => searchParams.get('q') ?? '');
   const [postingSource, setPostingSource] = useState('');
   const [postingSort, setPostingSort] = useState<PostingSort>('scoreDesc');
   const [postingMinScore, setPostingMinScore] = useState('');
@@ -97,6 +113,7 @@ export function PostingViewer() {
       rankStatus: postingRankStatus === 'all' ? undefined : postingRankStatus,
       archiveVisibility: postingArchiveVisibility,
       pageSize: postingPageSize,
+      scrapeRunId,
     }),
     [
       postingQuery,
@@ -106,6 +123,7 @@ export function PostingViewer() {
       postingRankStatus,
       postingArchiveVisibility,
       postingPageSize,
+      scrapeRunId,
     ]
   );
 
@@ -509,6 +527,10 @@ export function PostingViewer() {
   };
 
   const onViewActiveForCompany = (company: string) => {
+    if (onViewActiveForCompanyNavigate) {
+      onViewActiveForCompanyNavigate(company);
+      return;
+    }
     setPostingArchiveVisibility('active');
     setPostingQuery(company);
     resetPagination();
@@ -653,24 +675,30 @@ export function PostingViewer() {
   return (
     <section className='panel panel--postings'>
       <div className='panel-heading'>
-        <div>
-          <h2>Postings</h2>
-          {totalPostings !== undefined ? (
-            <p className='panel-subtitle tight'>
-              {filteredCount !== undefined
-                ? `${filteredCount} matching · ${totalPostings} active in database`
-                : `${totalPostings} active in database`}
-            </p>
-          ) : null}
-        </div>
-        <button
-          type='button'
-          className='btn-danger'
-          onClick={() => void onClearAll()}
-          disabled={isClearing}
-        >
-          {isClearing ? 'Clearing…' : 'Clear All'}
-        </button>
+        {headerContent ?? (
+          <>
+            <div>
+              <h2>Postings</h2>
+              {totalPostings !== undefined ? (
+                <p className='panel-subtitle tight'>
+                  {filteredCount !== undefined
+                    ? `${filteredCount} matching · ${totalPostings} active in database`
+                    : `${totalPostings} active in database`}
+                </p>
+              ) : null}
+            </div>
+            {showClearAll ? (
+              <button
+                type='button'
+                className='btn-danger'
+                onClick={() => void onClearAll()}
+                disabled={isClearing}
+              >
+                {isClearing ? 'Clearing…' : 'Clear All'}
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
       {postingMessage ? <p className='status-text'>{postingMessage}</p> : null}
       <div className='postings-sticky-toolbar'>
@@ -806,7 +834,13 @@ export function PostingViewer() {
         questionCounts={questionCounts}
         coverLetterCounts={coverLetterCounts}
         workerTriggerBaseUrl={workerTriggerBaseUrl}
-        emptyMessage={postingsLoading && !postings.length ? 'Loading…' : 'No postings match these filters.'}
+        emptyMessage={
+          postingsLoading && !postings.length
+            ? 'Loading…'
+            : scrapeRunId
+              ? 'No jobs linked to this run match these filters.'
+              : 'No postings match these filters.'
+        }
       />
       <div className='postings-pagination' aria-label='Postings pagination'>
         <div className='postings-pagination__inner'>

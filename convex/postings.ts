@@ -2,7 +2,15 @@ import { internalMutation, mutation, query } from './_generated/server.js';
 import { api, internal } from './_generated/api.js';
 import { v } from 'convex/values';
 import type { Doc } from './_generated/dataModel.js';
-import { getLatestRankingForPosting } from './postingsListHelpers.js';
+import {
+  getLatestRankingForPosting,
+  postingListRowValidator,
+  toPostingListRow,
+} from './postingsListHelpers.js';
+import {
+  deleteScrapeRunPostingsForPosting,
+  linkPostingToScrapeRun,
+} from './scrapeRunPostingsHelpers.js';
 
 export { listPage, listPageCount } from './postingsListPage.js';
 
@@ -190,6 +198,91 @@ export const getDetail = query({
 });
 
 /**
+ * Postings linked to a scrape run via `scrape_run_postings` (all runs that touched each job, not just the latest).
+ */
+export const listByScrapeRun = query({
+  args: {
+    runId: v.id('scrape_runs'),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(postingListRowValidator),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) {
+      return [];
+    }
+
+    const cap = args.limit && args.limit > 0 ? Math.min(args.limit, 5_000) : 5_000;
+    const links = await ctx.db
+      .query('scrape_run_postings')
+      .withIndex('by_scrape_run_id', (q) => q.eq('scrapeRunId', args.runId))
+      .take(cap);
+
+    const rows: Array<{ discoveredAt: number; row: ReturnType<typeof toPostingListRow> }> = [];
+    for (const link of links) {
+      const posting = await ctx.db.get(link.postingId);
+      if (!posting) {
+        continue;
+      }
+      const latestRanking = await getLatestRankingForPosting(ctx, posting._id);
+      rows.push({
+        discoveredAt: link.discoveredAt,
+        row: toPostingListRow(posting, latestRanking),
+      });
+    }
+
+    rows.sort((a, b) => b.discoveredAt - a.discoveredAt);
+    return rows.map((entry) => entry.row);
+  },
+});
+
+/**
+ * Backfills `scrape_run_postings` from `job_postings.scrapeRunId` (best-effort for data predating the join table).
+ * Run once after deploy: `npx convex run internal.postings.backfillScrapeRunPostings`
+ */
+export const backfillScrapeRunPostings = internalMutation({
+  args: {
+    cursor: v.optional(v.string()),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const batchSize =
+      args.batchSize && args.batchSize > 0 ? Math.min(Math.floor(args.batchSize), 200) : 100;
+    const result = await ctx.db.query('job_postings').paginate({
+      numItems: batchSize,
+      cursor: args.cursor ?? null,
+    });
+
+    let linked = 0;
+    for (const posting of result.page) {
+      if (!posting.scrapeRunId) {
+        continue;
+      }
+      const before = await ctx.db
+        .query('scrape_run_postings')
+        .withIndex('by_scrape_run_and_posting', (q) =>
+          q.eq('scrapeRunId', posting.scrapeRunId!).eq('postingId', posting._id)
+        )
+        .first();
+      if (before) {
+        continue;
+      }
+      await linkPostingToScrapeRun(ctx, posting.scrapeRunId, posting._id, posting.discoveredAt);
+      linked += 1;
+    }
+
+    if (!result.isDone) {
+      await ctx.scheduler.runAfter(0, internal.postings.backfillScrapeRunPostings, {
+        cursor: result.continueCursor,
+        batchSize,
+      });
+    }
+
+    return { processed: result.page.length, linked, hasMore: !result.isDone };
+  },
+});
+
+/**
  * Backfills `latestScoreOverall` / `latestRankedAt` on all postings from ranking history.
  * Run once after deploy: `npx convex run postings:backfillLatestRankingDenorm`
  */
@@ -292,11 +385,17 @@ export const upsertBatch = mutation({
           rawPayload: posting.rawPayload,
           updatedAt: now,
         });
+        await linkPostingToScrapeRun(
+          ctx,
+          posting.scrapeRunId,
+          existing._id,
+          posting.discoveredAt ?? now
+        );
         updated += 1;
         continue;
       }
 
-      await ctx.db.insert('job_postings', {
+      const postingId = await ctx.db.insert('job_postings', {
         source: posting.source,
         externalId: posting.externalId,
         url: posting.url,
@@ -312,6 +411,7 @@ export const upsertBatch = mutation({
         createdAt: now,
         updatedAt: now,
       });
+      await linkPostingToScrapeRun(ctx, posting.scrapeRunId, postingId, posting.discoveredAt ?? now);
       inserted += 1;
     }
 
@@ -384,8 +484,16 @@ export const deleteOne = mutation({
       }
     }
 
+    const deletedRunLinks = await deleteScrapeRunPostingsForPosting(ctx, args.postingId);
+
     await ctx.db.delete(args.postingId);
-    return { deletedPosting: true, deletedRankings, deletedQuestions, deletedCoverLetters };
+    return {
+      deletedPosting: true,
+      deletedRankings,
+      deletedQuestions,
+      deletedCoverLetters,
+      deletedRunLinks,
+    };
   },
 });
 
@@ -416,6 +524,11 @@ export const clearAll = mutation({
       await ctx.db.delete(row._id);
     }
 
+    const runLinksBatch = await ctx.db.query('scrape_run_postings').take(batchSize);
+    for (const row of runLinksBatch) {
+      await ctx.db.delete(row._id);
+    }
+
     const postingsBatch = await ctx.db.query('job_postings').take(batchSize);
     for (const row of postingsBatch) {
       await ctx.db.delete(row._id);
@@ -425,8 +538,10 @@ export const clearAll = mutation({
     const hasMoreQuestions = (await ctx.db.query('posting_questions').take(1)).length > 0;
     const hasMoreCoverLetters =
       (await ctx.db.query('posting_cover_letter_outlines').take(1)).length > 0;
+    const hasMoreRunLinks = (await ctx.db.query('scrape_run_postings').take(1)).length > 0;
     const hasMorePostings = (await ctx.db.query('job_postings').take(1)).length > 0;
-    const hasMore = hasMoreRankings || hasMoreQuestions || hasMoreCoverLetters || hasMorePostings;
+    const hasMore =
+      hasMoreRankings || hasMoreQuestions || hasMoreCoverLetters || hasMoreRunLinks || hasMorePostings;
 
     if (hasMore) {
       await ctx.scheduler.runAfter(0, api.postings.clearAll, { batchSize });
@@ -437,6 +552,7 @@ export const clearAll = mutation({
       deletedRankings: rankingsBatch.length,
       deletedQuestions: questionsBatch.length,
       deletedCoverLetters: coverLettersBatch.length,
+      deletedRunLinks: runLinksBatch.length,
       hasMore,
     };
   },

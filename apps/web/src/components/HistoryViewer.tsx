@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from 'convex/react';
 
 import { api } from '../../../../convex/_generated/api.js';
@@ -166,6 +167,7 @@ function parsedLogLevelForFilter(parsed: Record<string, unknown> | null): LogLev
 }
 
 export function HistoryViewer() {
+  const navigate = useNavigate();
   const updateStatus = useMutation(api.runs.updateStatus);
   const requestGracefulStop = useMutation(api.runs.requestGracefulStop);
   const deleteRunWithLogs = useMutation(api.runs.deleteRunWithLogs);
@@ -472,6 +474,9 @@ export function HistoryViewer() {
                       )}
                     </td>
                     <td className='queue-actions-cell'>
+                      <button type='button' onClick={() => navigate(`/postings/${run._id}`)}>
+                        View Jobs
+                      </button>
                       <button type='button' onClick={() => setSelectedRunId(run._id)}>
                         Logs
                       </button>

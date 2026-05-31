@@ -17,12 +17,14 @@ Job Bot is a monorepo MVP for collecting job postings, deduplicating them in Con
   - **Cover letter outline** (`PostingCoverLetterPanel.tsx`): expand inline per row. Version list at top; provider, model, and generate form at bottom. Each completed version has **Copy** (raw markdown) and **Revise** (inline, links to parent via `revisedFromId`). Outlines are prompted to be **terse** (short phrase bullets, ~1 minute skim). **OpenAI** uses Convex `postingCoverLetters.generateHttp`; **Cursor** uses worker `POST /cover-letter-outline`. Same provider/model defaults as Ask (`LLM_QA_*`).
   - bulk score uses **fixed-size chunks** (default **3 postings** per LLM/CLI request); global rank is merged by `scoreOverall` after all chunks succeed
 - **View** modal loads `postings.getDetail` (full posting + latest ranking + raw JSON), including latest reasoning summary rendered as markdown
+- **Run jobs** page (`/postings/:runId`, `RunPostingsPage.tsx`): same list UI as Postings (filters, bulk actions, Score, Ask, Cover letter, archive, delete, pagination) scoped to jobs linked to that run via `scrape_run_postings`; `listPage` accepts optional `scrapeRunId`
 - Workers (`/workers`) scheduler status (`WorkerSchedulerPanel` → reactive Convex `worker_scheduler_status`) and a unified **queue + schedules** panel (`apps/web/src/components/WorkerQueuePanel.tsx`) plus history (`apps/web/src/components/HistoryViewer.tsx`) with:
   - a single **Add run** form (`apps/web/src/components/WorkerRunDialog.tsx`, rendered inline above the list) with a One-time / Recurring toggle. One-time runs are **ephemeral**: they enqueue a `scrape_runs` row immediately (and best-effort wake the worker) without persisting a `worker_schedules` row, so they appear only as queued runs / history. Recurring runs persist a `worker_schedules` row that the Convex cron `tick` fires on cadence.
   - there is no user-defined schedule name; a display label is **derived** from source + criteria + cadence (`formatRunLabel` in `apps/web/src/lib/formatSourceCriteria.ts`)
   - the merged table lists recurring schedules and pending one-time runs together; per-row actions are Run now / Edit / Enable-Disable / Delete (recurring) and Trigger now / Edit / Remove (one-time)
   - status color coding (`queued` blue, `scraping` yellow, `ranking` purple with batch progress e.g. `ranking 2/5`, `succeeded` green, `failed`/`cancelled` red; legacy `running` rows display like scraping)
-  - history actions (`Logs`, `Stop`, `Delete`) and `Clear All`
+  - history actions (`View Jobs`, `Logs`, `Stop`, `Delete`) and `Clear All`
+  - **View Jobs** opens `/postings/:runId` (jobs linked to that run via `scrape_run_postings`)
   - log detail modal with table-first view, **per-level filters** (debug / info / warn / error), and raw JSON
 - Settings (`/settings`, sidebar layout in `apps/web/src/pages/SettingsLayout.tsx`): **Overview** plus section routes (`/settings/scheduler`, `/settings/linkedin`, `/settings/remotive`, `/settings/ranking`, `/settings/http-openai`, `/settings/cursor-cli`, `/settings/web`, `/settings/advanced`). Worker, LinkedIn, Remotive, ranking, HTTP/OpenAI (non-secret), Cursor CLI, and web↔worker options stored in Convex `app_settings`; each field has always-visible hint text (catalog in `packages/shared/src/settings/appSettingDefinitions.ts`). Non-empty env vars override saved values; the worker refreshes settings about every 30 seconds. Draft edits persist across section navigation until you save.
 - Sources (`/sources`, `apps/web/src/components/SourcesManager.tsx`) with:
@@ -87,7 +89,8 @@ Web static assets include a robot favicon at `apps/web/public/favicon.svg`.
 - `scrape_runs.usedLinkedinUrlFallback`: boolean warning flag for URL fallback usage
 - `scrape_runs.linkedinFallbackReason`: structured reason when fallback is used
 - `run_log_lines`: JSON log lines for a run (streamed from the worker; used by the Workers log modal and run log page)
-- `job_postings`: normalized postings deduplicated by source + external id; optional denormalized `latestScoreOverall` / `latestRankedAt` for indexed list sort/filter (patched on `ranking.upsertResults`; backfill with `npm run backfill:postings-denorm`); optional `archivedAt` / `archiveLabel` (`good` | `bad`) / `archiveNotes` for soft archive (hidden from default active list; rankings and Q&A preserved)
+- `job_postings`: normalized postings deduplicated by source + external id; optional denormalized `latestScoreOverall` / `latestRankedAt` for indexed list sort/filter (patched on `ranking.upsertResults`; backfill with `npm run backfill:postings-denorm`); optional `archivedAt` / `archiveLabel` (`good` | `bad`) / `archiveNotes` for soft archive (hidden from default active list; rankings and Q&A preserved); optional `scrapeRunId` points at the **latest** run that upserted the row (ranking/orchestrator use)
+- `scrape_run_postings`: join table linking each scrape run to every posting seen during that run (source of truth for `/postings/:runId`; populated on `postings.upsertBatch`; one row per `(scrapeRunId, postingId)`)
 - `job_rankings`: per-posting scoring outputs (`scoreOverall`, reasoning, criteria match, red flags) linked by `evaluatorId` — no `rank` field
 - `ranking_llm_providers`: stable `key`, `displayName`, `surface` (`convex_http` = OpenAI-compatible call from Convex; `worker_cursor` = Cursor CLI on the worker), `sortOrder`
 - `ranking_llm_models`: `providerKey`, `apiModelId`, `displayName`, `sortOrder` (options shown in the Score and Ask panels)
@@ -130,6 +133,7 @@ Early development cutover: schema now uses `job_evaluators`, `job_sources`, and 
 - `api.postings.listPageCount` (filtered row count for page X of Y)
 - `api.postings.getDescription` (full `descriptionSnippet` for list expand)
 - `api.postings.getDetail` (full posting + latest ranking for View modal)
+- `api.postings.listByScrapeRun` (postings linked to one run via `scrape_run_postings`)
 - `api.postings.count` (active postings only; archived rows excluded)
 - `api.postings.getById` (worker / scripts)
 - `api.postings.upsertBatch`
@@ -179,6 +183,8 @@ Each `listPage` row includes posting `_id`, `title`, `company`, `url`, `location
 `paginationOpts.numItems` is capped at **100** server-side. Default UI page size is **20** (user-selectable 10 / 20 / 50 / 100).
 
 After deploying schema changes for denormalized scores, run once: `npm run backfill:postings-denorm`.
+
+After deploying `scrape_run_postings`, run once to link existing postings to their latest run only (multi-run history before this table is not recoverable): `npx convex run internal.postings.backfillScrapeRunPostings`.
 
 ## Local setup
 

@@ -7,6 +7,7 @@ import { PostingViewer } from './components/PostingViewer';
 import { SourcesManager } from './components/SourcesManager';
 import { DashboardHome } from './pages/DashboardHome';
 import { RunDetailPage } from './pages/RunDetailPage';
+import { RunPostingsPage } from './pages/RunPostingsPage';
 import {
   SettingsIndexRedirect,
   SettingsLayout,
@@ -32,6 +33,7 @@ export function App() {
         </Route>
         <Route path='criteria' element={<Navigate to='/evaluators' replace />} />
         <Route path='sources' element={<SourcesManager />} />
+        <Route path='postings/:runId' element={<RunPostingsPage />} />
         <Route path='postings' element={<PostingViewer />} />
         <Route path='workers' element={<HistoryViewer />} />
         <Route path='workers/runs/:runId' element={<RunDetailPage />} />

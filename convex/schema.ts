@@ -123,6 +123,21 @@ export default defineSchema({
     .index('by_archive_label_archived_at', ['archiveLabel', 'archivedAt'])
     .index('by_company_archived_at', ['company', 'archivedAt']),
 
+  /**
+   * Links scrape runs to postings discovered or updated during that run.
+   * Source of truth for `/postings/:runId`; `job_postings.scrapeRunId` remains the latest-run pointer only.
+   */
+  scrape_run_postings: defineTable({
+    scrapeRunId: v.id('scrape_runs'),
+    postingId: v.id('job_postings'),
+    /** When the worker saw this posting during this run (from upsert `discoveredAt`). */
+    discoveredAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index('by_scrape_run_id', ['scrapeRunId'])
+    .index('by_scrape_run_and_posting', ['scrapeRunId', 'postingId'])
+    .index('by_posting_id', ['postingId']),
+
   job_rankings: defineTable({
     postingId: v.id('job_postings'),
     evaluatorId: v.optional(v.id('job_evaluators')),

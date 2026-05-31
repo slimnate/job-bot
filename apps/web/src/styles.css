@@ -2806,6 +2806,23 @@ thead th {
   margin-right: 0.5rem;
 }
 
+.run-postings-heading-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.run-postings-heading-error {
+  color: #fca5a5;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(100%, 40rem);
+}
+
 .raw-json-toolbar {
   display: flex;
   align-items: center;

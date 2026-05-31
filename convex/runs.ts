@@ -1,6 +1,7 @@
 import { internalMutation, mutation, query } from './_generated/server.js';
 import { api } from './_generated/api.js';
 import { v } from 'convex/values';
+import { deleteScrapeRunPostingsForRun } from './scrapeRunPostingsHelpers.js';
 import { normalizeSourceCriteria, sourceDefinitions, sourceKeyValidator } from './sourceContract.js';
 
 import type { Doc, Id } from './_generated/dataModel.js';
@@ -461,8 +462,10 @@ export const deleteRunWithLogs = mutation({
       }
     }
 
+    const deletedRunLinks = await deleteScrapeRunPostingsForRun(ctx, args.runId);
+
     await ctx.db.delete(args.runId);
-    return { deletedRun: true, deletedLogs };
+    return { deletedRun: true, deletedLogs, deletedRunLinks };
   },
 });
 
@@ -483,14 +486,20 @@ export const clearAllRunsAndLogs = mutation({
       await ctx.db.delete(row._id);
     }
 
+    const runLinkRows = await ctx.db.query('scrape_run_postings').take(batchSize);
+    for (const row of runLinkRows) {
+      await ctx.db.delete(row._id);
+    }
+
     const runRows = await ctx.db.query('scrape_runs').withIndex('by_started_at').take(batchSize);
     for (const row of runRows) {
       await ctx.db.delete(row._id);
     }
 
     const hasMoreLogs = (await ctx.db.query('run_log_lines').take(1)).length > 0;
+    const hasMoreRunLinks = (await ctx.db.query('scrape_run_postings').take(1)).length > 0;
     const hasMoreRuns = (await ctx.db.query('scrape_runs').withIndex('by_started_at').take(1)).length > 0;
-    const hasMore = hasMoreLogs || hasMoreRuns;
+    const hasMore = hasMoreLogs || hasMoreRunLinks || hasMoreRuns;
 
     if (hasMore) {
       await ctx.scheduler.runAfter(0, api.runs.clearAllRunsAndLogs, { batchSize });
@@ -499,6 +508,7 @@ export const clearAllRunsAndLogs = mutation({
     return {
       deletedRuns: runRows.length,
       deletedLogs: logRows.length,
+      deletedRunLinks: runLinkRows.length,
       hasMore,
     };
   },

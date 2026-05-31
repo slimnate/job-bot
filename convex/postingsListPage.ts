@@ -1,7 +1,7 @@
 import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 import { query } from './_generated/server.js';
-import type { Doc } from './_generated/dataModel.js';
+import type { Doc, Id } from './_generated/dataModel.js';
 import type { QueryCtx } from './_generated/server.js';
 import {
   capListPageNumItems,
@@ -44,6 +44,7 @@ type ListFilterArgs = {
   sort?: ListSort;
   rankStatus?: 'ranked' | 'unranked';
   archiveVisibility?: ArchiveVisibility;
+  scrapeRunId?: Id<'scrape_runs'>;
 };
 
 type ListPageArgs = ListFilterArgs & {
@@ -303,6 +304,70 @@ function buildIndexedFilteredQuery(ctx: QueryCtx, args: ListFilterArgs) {
 }
 
 /**
+ * Loads postings linked to a scrape run, applies list filters, sorts (run `discoveredAt` uses join row time).
+ */
+async function collectScrapeRunMatches(
+  ctx: QueryCtx,
+  args: ListFilterArgs & { scrapeRunId: Id<'scrape_runs'> }
+) {
+  const links = await ctx.db
+    .query('scrape_run_postings')
+    .withIndex('by_scrape_run_id', (q) => q.eq('scrapeRunId', args.scrapeRunId))
+    .take(5_000);
+
+  const sortBy = args.sort ?? 'discoveredAtDesc';
+  const normalizedQuery = args.query?.trim().toLowerCase();
+  const linkDiscoveredAt = new Map<string, number>();
+  const postings: Doc<'job_postings'>[] = [];
+
+  for (const link of links) {
+    const posting = await ctx.db.get(link.postingId);
+    if (!posting) {
+      continue;
+    }
+    if (normalizedQuery && !postingMatchesTextQuery(posting, normalizedQuery)) {
+      continue;
+    }
+    if (!postingMatchesListFilters(posting, args)) {
+      continue;
+    }
+    linkDiscoveredAt.set(posting._id, link.discoveredAt);
+    postings.push(posting);
+  }
+
+  postings.sort((a, b) => {
+    if (sortBy === 'discoveredAtDesc') {
+      return (
+        (linkDiscoveredAt.get(b._id) ?? b.discoveredAt) - (linkDiscoveredAt.get(a._id) ?? a.discoveredAt)
+      );
+    }
+    return comparePostingsForSort(a, b, sortBy);
+  });
+
+  return postings;
+}
+
+/**
+ * Run-scoped list: filter/sort in memory, paginate with offset cursor (same as text search).
+ */
+async function listPageForScrapeRun(ctx: QueryCtx, args: ListPageArgs & { scrapeRunId: Id<'scrape_runs'> }) {
+  const numItems = capListPageNumItems(args.paginationOpts.numItems);
+  const offset = decodeSearchListCursor(args.paginationOpts.cursor);
+
+  const matched = await collectScrapeRunMatches(ctx, args);
+  const pagePostings = matched.slice(offset, offset + numItems);
+  const page = await attachRankingPreviews(ctx, pagePostings);
+  const nextOffset = offset + pagePostings.length;
+  const isDone = nextOffset >= matched.length;
+
+  return {
+    page,
+    isDone,
+    continueCursor: isDone ? '' : encodeSearchListCursor(nextOffset),
+  };
+}
+
+/**
  * Text search path: scan matching postings, sort in memory, return a manual page slice.
  */
 async function listPageWithTextSearch(ctx: QueryCtx, args: ListPageArgs) {
@@ -351,6 +416,7 @@ const listFilterArgsValidator = {
   sort: v.optional(listSortValidator),
   rankStatus: v.optional(v.union(v.literal('ranked'), v.literal('unranked'))),
   archiveVisibility: v.optional(archiveVisibilityValidator),
+  scrapeRunId: v.optional(v.id('scrape_runs')),
 };
 
 function normalizeListFilterArgs(args: {
@@ -361,6 +427,7 @@ function normalizeListFilterArgs(args: {
   sort?: ListSort;
   rankStatus?: 'ranked' | 'unranked';
   archiveVisibility?: ArchiveVisibility;
+  scrapeRunId?: Id<'scrape_runs'>;
 }): ListFilterArgs {
   return {
     query: args.query?.trim() || undefined,
@@ -370,6 +437,7 @@ function normalizeListFilterArgs(args: {
     sort: args.sort,
     rankStatus: args.rankStatus,
     archiveVisibility: args.archiveVisibility,
+    scrapeRunId: args.scrapeRunId,
   };
 }
 
@@ -391,6 +459,17 @@ export const listPage = query({
       ...filterArgs,
     };
 
+    if (filterArgs.scrapeRunId) {
+      const run = await ctx.db.get(filterArgs.scrapeRunId);
+      if (!run) {
+        return { page: [], isDone: true, continueCursor: '' };
+      }
+      return await listPageForScrapeRun(ctx, {
+        ...listArgs,
+        scrapeRunId: filterArgs.scrapeRunId,
+      });
+    }
+
     if (filterArgs.query) {
       return await listPageWithTextSearch(ctx, { ...listArgs, query: filterArgs.query });
     }
@@ -405,6 +484,15 @@ export const listPageCount = query({
   args: listFilterArgsValidator,
   handler: async (ctx, args) => {
     const filterArgs = normalizeListFilterArgs(args);
+
+    if (filterArgs.scrapeRunId) {
+      const run = await ctx.db.get(filterArgs.scrapeRunId);
+      if (!run) {
+        return 0;
+      }
+      return (await collectScrapeRunMatches(ctx, { ...filterArgs, scrapeRunId: filterArgs.scrapeRunId }))
+        .length;
+    }
 
     if (filterArgs.query) {
       const matched = await collectTextSearchMatches(ctx, { ...filterArgs, query: filterArgs.query });
