@@ -3,9 +3,7 @@ Capture chrome state on scraping failure: Capture page contents (HTML, JS, etc) 
 [x] Archive postings with good/bad labels; filter archived on /postings (active / archived / good / bad).
 Use archived good postings to revisit employers — filter by company on active list.
 
-Use archived good/bad postings to inform future rankings (inject examples into buildRankingPrompt; app settings toggle).
-
-Application status tracking. "Starred" feature to mark postings that are important. Add status field to postings such as: want to apply, applied, wont apply, rejected, etc.
+Application status tracking. "Starred" feature to mark postings that are important. Add status field to postings such as: want to apply, applied, wont apply, rejected, etc. Suggest a list of what status' I may want to include here, if you think I missed any.
 
 Notifications
 
@@ -16,3 +14,7 @@ Wizard to create a scoring rubric for any generic type of job the user could wan
 Review system prompts and make modifications as necessary
 
 Examine tests created, document test suite, make sure tests (specifically linkedin related) aren't doing lots of unnecessary work.
+
+Add ability to run as a linux service. Create install script.
+
+Add "View Jobs" button to the history list that shows a list of all jobs scraped in that run.

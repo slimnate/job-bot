@@ -372,8 +372,11 @@ export class WorkerOrchestrator {
             });
           }
 
-          const candidatesForRun = recompute.candidates.filter(
+          const touchedThisRun = recompute.candidates.filter(
             (posting) => posting.scrapeRunId === payload.runId
+          );
+          const candidatesForRun = touchedThisRun.filter(
+            (posting) => posting.latestRankedAt === undefined
           );
 
           workerLog.info('run.phase', {
@@ -381,6 +384,7 @@ export class WorkerOrchestrator {
             runId: payload.runId,
             source: payload.source,
             candidateCount: candidatesForRun.length,
+            skippedAlreadyRanked: touchedThisRun.length - candidatesForRun.length,
           });
 
           if (candidatesForRun.length > 0) {
